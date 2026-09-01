@@ -118,20 +118,39 @@ def _read(source: BinaryIO | bytes | str | Path) -> bytes:
 
 
 def _parse_text(data: bytes, filename: str | None) -> ParsedDocument:
-    for encoding in ("utf-8", "utf-16", "cp1252", "latin-1"):
+    label = filename or "file"
+    if _is_binary(data):
+        raise UnsupportedDocument(
+            f"{label} looks like a binary format this engine cannot read"
+        )
+
+    # UTF-16 is only attempted behind a byte-order mark. Tried speculatively it
+    # succeeds on almost any even-length input, turning binary into plausible
+    # text -- which is worse than failing, because nothing downstream can tell.
+    encodings = ("utf-8", "cp1252", "latin-1")
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        encodings = ("utf-16", *encodings)
+
+    for encoding in encodings:
         try:
-            decoded = data.decode(encoding)
-            break
+            return _assemble([data.decode(encoding)], SourceKind.PLAIN_TEXT)
         except UnicodeDecodeError:
             continue
-    else:  # pragma: no cover - latin-1 cannot fail
-        raise UnsupportedDocument(f"could not decode {filename or 'file'} as text")
+    raise UnsupportedDocument(f"could not decode {label} as text")
 
-    if "\x00" in decoded:
-        raise UnsupportedDocument(
-            f"{filename or 'file'} looks like a binary format this engine cannot read"
-        )
-    return _assemble([decoded], SourceKind.PLAIN_TEXT)
+
+def _is_binary(data: bytes) -> bool:
+    """Heuristic used by `file(1)` and git: nulls, or many control bytes.
+
+    Only the head is examined; a file that is text for its first kilobyte is
+    text for our purposes.
+    """
+    head = data[:1024]
+    if b"\x00" in head:
+        return True
+    printable = bytes(range(0x20, 0x7F)) + b"\n\r\t\f\b"
+    control = sum(1 for byte in head if byte not in printable and byte < 0x80)
+    return control / max(len(head), 1) > 0.3
 
 
 def _parse_pdf(data: bytes) -> ParsedDocument:

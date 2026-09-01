@@ -34,6 +34,21 @@ class TestPlainText:
         with pytest.raises(UnsupportedDocument, match="binary"):
             parse(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00")
 
+    def test_binary_without_null_bytes_is_still_rejected(self):
+        """Regression: speculative UTF-16 decoding turned binary into text.
+
+        Almost any even-length byte string decodes as UTF-16 without error, so
+        trying it unprompted made image uploads succeed as documents full of
+        garbage glyphs -- a failure nothing downstream could detect.
+        """
+        with pytest.raises(UnsupportedDocument, match="binary"):
+            parse(bytes(range(0x80, 0xFF)) * 8)
+
+    def test_utf16_with_a_byte_order_mark_is_decoded(self):
+        document = parse("Submit before 18 September.".encode("utf-16"))
+
+        assert "Submit before" in document.text
+
     def test_empty_input_is_rejected(self):
         with pytest.raises(UnsupportedDocument, match="empty"):
             parse(b"   \n\t  ")
