@@ -23,6 +23,14 @@ PAGE_BREAK = "\n\n"
 #: be a scan whose text layer is absent or decorative.
 _SCAN_THRESHOLD = 24
 
+#: Bytes examined when deciding whether a file is text. A file that reads as
+#: text for its first kilobyte is text for our purposes.
+_SNIFF_BYTES = 1024
+
+#: Fraction of the sniffed bytes that must be printable ASCII for a non-UTF-8
+#: file to be treated as legacy single-byte text rather than binary.
+_ASCII_TEXT_RATIO = 0.7
+
 
 class SourceKind(str, Enum):
     PLAIN_TEXT = "plain_text"
@@ -118,20 +126,44 @@ def _read(source: BinaryIO | bytes | str | Path) -> bytes:
 
 
 def _parse_text(data: bytes, filename: str | None) -> ParsedDocument:
+    """Decode text, refusing binary rather than turning it into garbage glyphs.
+
+    Encoding detection is deliberately conservative. UTF-16 is only attempted
+    behind a byte-order mark: tried speculatively it succeeds on almost any
+    even-length byte string, so an uploaded image becomes a document full of
+    plausible-looking CJK characters that nothing downstream can recognise as
+    wrong.
+    """
     label = filename or "file"
-    if _is_binary(data):
+
+    # UTF-16 legitimately contains null bytes, so its BOM has to be read before
+    # the binary heuristic below rejects it for containing them.
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return _assemble([data.decode("utf-16")], SourceKind.PLAIN_TEXT)
+        except UnicodeDecodeError:
+            pass
+
+    if b"\x00" in data[:_SNIFF_BYTES]:
         raise UnsupportedDocument(
             f"{label} looks like a binary format this engine cannot read"
         )
 
-    # UTF-16 is only attempted behind a byte-order mark. Tried speculatively it
-    # succeeds on almost any even-length input, turning binary into plausible
-    # text -- which is worse than failing, because nothing downstream can tell.
-    encodings = ("utf-8", "cp1252", "latin-1")
-    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
-        encodings = ("utf-16", *encodings)
+    try:
+        # UTF-8 is strongly self-validating; arbitrary binary rarely decodes.
+        return _assemble([data.decode("utf-8-sig")], SourceKind.PLAIN_TEXT)
+    except UnicodeDecodeError:
+        pass
 
-    for encoding in encodings:
+    # Not UTF-8. Either legacy single-byte text, or binary. Real single-byte
+    # text is overwhelmingly ASCII with occasional accented characters; binary
+    # is not.
+    if not _mostly_ascii(data):
+        raise UnsupportedDocument(
+            f"{label} looks like a binary format this engine cannot read"
+        )
+
+    for encoding in ("cp1252", "latin-1"):
         try:
             return _assemble([data.decode(encoding)], SourceKind.PLAIN_TEXT)
         except UnicodeDecodeError:
@@ -139,18 +171,13 @@ def _parse_text(data: bytes, filename: str | None) -> ParsedDocument:
     raise UnsupportedDocument(f"could not decode {label} as text")
 
 
-def _is_binary(data: bytes) -> bool:
-    """Heuristic used by `file(1)` and git: nulls, or many control bytes.
-
-    Only the head is examined; a file that is text for its first kilobyte is
-    text for our purposes.
-    """
-    head = data[:1024]
-    if b"\x00" in head:
-        return True
-    printable = bytes(range(0x20, 0x7F)) + b"\n\r\t\f\b"
-    control = sum(1 for byte in head if byte not in printable and byte < 0x80)
-    return control / max(len(head), 1) > 0.3
+def _mostly_ascii(data: bytes) -> bool:
+    """True when the head of `data` reads as prose in a single-byte encoding."""
+    head = data[:_SNIFF_BYTES]
+    if not head:
+        return False
+    textual = bytes(range(0x20, 0x7F)) + b"\n\r\t\f"
+    return sum(byte in textual for byte in head) / len(head) >= _ASCII_TEXT_RATIO
 
 
 def _parse_pdf(data: bytes) -> ParsedDocument:
