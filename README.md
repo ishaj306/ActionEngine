@@ -76,6 +76,11 @@ are invisible in the output and wrong about half the time.
 | Action & requirement extraction | Rules today, hybrid next | The rule arm is the evaluation baseline, not a stub |
 | Relevance, ambiguity | Model (next phase) | No rule-based answer exists |
 
+`03/04/2026` comes back flagged with **both** readings and a confidence of 0.45,
+not silently disambiguated.
+
+---
+
 ## OCR
 
 `modules/ingestion/ocr.py` defines an `OcrEngine` protocol with a Tesseract
@@ -91,9 +96,6 @@ PDF library purely to redraw what is already there.
 
 Install Tesseract to enable it; without it, images and scans are refused with a
 reason rather than silently producing an empty plan.
-
-`03/04/2026` comes back flagged with **both** readings and a confidence of 0.45,
-not silently disambiguated.
 
 ---
 
