@@ -490,6 +490,14 @@
 }
 
 @media (max-width: 900px) {
+  /* The workspace owns the scroll in the stacked layout; see page.module.css.
+     Height must be auto so the grid row grows to fit rather than clipping. */
+  .pane {
+    height: auto;
+    min-height: auto;
+    overflow-y: visible;
+  }
+
   .summary,
   .section {
     padding-inline: 18px;

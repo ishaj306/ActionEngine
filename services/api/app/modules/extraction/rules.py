@@ -382,8 +382,19 @@ def _tidy(text: str, *, fallback: str) -> str:
     # The notice addresses students in the third person; the plan addresses the
     # reader directly, so "submit their form" becomes "submit your form".
     cleaned = _THIRD_PERSON.sub("your", cleaned)
-    cleaned = cleaned[:_MAX_DESCRIPTION_CHARS].rstrip()
+    cleaned = _truncate(cleaned)
     return cleaned[:1].upper() + cleaned[1:]
+
+
+def _truncate(text: str) -> str:
+    """Cut at a word boundary. A mid-phrase cut ("…before 18") reads as data loss."""
+    if len(text) <= _MAX_DESCRIPTION_CHARS:
+        return text
+    clipped = text[:_MAX_DESCRIPTION_CHARS]
+    boundary = clipped.rfind(" ")
+    if boundary > _MAX_DESCRIPTION_CHARS // 2:
+        clipped = clipped[:boundary]
+    return clipped.rstrip(".,;: ") + "…"
 
 
 def _is_resolved_nearby(text: str, match: re.Match[str], pattern: re.Pattern[str]) -> bool:

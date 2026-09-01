@@ -111,10 +111,14 @@
 }
 
 @media (max-width: 900px) {
+  /* One column, one scroller. Two side-by-side panes become two stacked ones,
+     and nesting a scroll area inside the page scroll makes both hard to use --
+     so the panes stop scrolling and the workspace scrolls as a single page. */
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
     overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .timing {

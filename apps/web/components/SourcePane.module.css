@@ -109,8 +109,16 @@
     border-top: 1px solid var(--line);
   }
 
+  /* Stacked layout: the workspace scrolls, this pane does not. It must size to
+     its own content, or the grid row collapses and the two panes overlap. */
+  .pane {
+    height: auto;
+    min-height: auto;
+  }
+
   .scroll {
+    flex: none;
+    overflow-y: visible;
     padding: 20px 18px 32px;
-    max-height: 46dvh;
   }
 }

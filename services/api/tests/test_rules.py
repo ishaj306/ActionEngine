@@ -153,6 +153,22 @@ class TestActionExtraction:
         assert found
         assert found[0].description == "Upload your updated resume"
 
+    def test_long_descriptions_truncate_on_a_word_boundary(self):
+        long_sentence = (
+            "Students must submit the completed application form along with "
+            "the income certificate, the caste certificate, the domicile "
+            "certificate, the previous marksheet and two passport size "
+            "photographs to the designated office before 18 September 2026."
+        )
+        found = extract_actions(long_sentence)
+
+        assert found
+        description = found[0].description
+        assert description.endswith("…")
+        assert not description.rstrip("…").endswith(" ")
+        # A cut mid-word would leave a fragment of the following token.
+        assert long_sentence.count(description.rstrip("…").split()[-1]) >= 1
+
     def test_a_long_subject_is_dropped_rather_than_folded_in(self):
         found = extract_actions(
             "All third-year students enrolled in the Computer Science programme "
