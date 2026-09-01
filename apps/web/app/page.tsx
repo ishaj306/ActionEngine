@@ -76,6 +76,8 @@ export default function Page() {
         return analysis.primary_deadline?.evidence ?? null;
       case "title":
         return analysis.title?.evidence ?? null;
+      case "type":
+        return analysis.document_type.evidence ?? null;
       default:
         return null;
     }
@@ -90,7 +92,9 @@ export default function Page() {
       const index = Number.parseInt(selection.id.replace("gap-", ""), 10);
       return analysis.gaps[index]?.question ?? null;
     }
-    return selection.kind === "deadline" ? "the deadline" : "the title";
+    if (selection.kind === "deadline") return "the deadline";
+    if (selection.kind === "type") return "the document type";
+    return "the title";
   }, [analysis, selection]);
 
   return (
@@ -225,7 +229,7 @@ function Composer({
         <input
           ref={fileInput}
           type="file"
-          accept=".pdf,.txt,.md,text/plain,application/pdf"
+          accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.tif,.tiff,.webp,text/plain,application/pdf,image/*"
           className="visually-hidden"
           onChange={(event) => {
             const file = event.target.files?.[0];
@@ -235,7 +239,7 @@ function Composer({
         />
 
         <p className={styles.dropText}>
-          Drop a PDF or text file here
+          Drop a PDF, image, or text file here
         </p>
         <button
           type="button"
@@ -252,7 +256,10 @@ function Composer({
             "Choose file"
           )}
         </button>
-        <p className={styles.limit}>PDF or plain text, up to 20&nbsp;MB</p>
+        <p className={styles.limit}>
+          PDF, photo or scan, or plain text — up to 20&nbsp;MB. Scans are read by
+          OCR where it is installed.
+        </p>
       </div>
 
       <div className={styles.orRow}>

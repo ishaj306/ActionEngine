@@ -51,6 +51,30 @@
   min-width: 0;
 }
 
+.docType {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+  min-height: 24px;
+}
+
+.docType:hover {
+  background: var(--surface-sunken);
+}
+
+.docTypeValue {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+
 .facts {
   display: flex;
   flex-wrap: wrap;
@@ -418,6 +442,57 @@
 
 .blocked {
   color: var(--uncertain);
+}
+
+/* ---------- requirements ---------- */
+
+.reqGroups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px 20px;
+}
+
+.reqGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.reqGroupLabel {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.reqList {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reqItem {
+  position: relative;
+  padding-left: 15px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  overflow-wrap: break-word;
+}
+
+/* A hollow marker: these are things to gather, not things already done. */
+.reqItem::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.52em;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--ink-quaternary);
+  border-radius: 2px;
 }
 
 /* ---------- gaps ---------- */

@@ -23,7 +23,10 @@ from app.domain.claims import (
 )
 from app.domain.span import EvidenceSpan
 from app.modules.action_engine.planner import Action, ActionVerb, Plan, build_plan
+from app.modules.extraction import requirements as requirement_rules
 from app.modules.extraction import rules
+from app.modules.extraction.classify import TYPE_LABEL, classify
+from app.modules.extraction.requirements import Requirement
 from app.modules.extraction.temporal import (
     TemporalExpression,
     TemporalKind,
@@ -67,12 +70,17 @@ class Analysis:
 
     document_id: str
     title: Claim[str] | None
+    document_type: Claim[str]
     deadlines: tuple[Claim[date], ...]
     plan: Plan
     gaps: tuple[InformationGap, ...]
+    requirements: tuple[Requirement, ...]
     source_kind: SourceKind
     page_count: int
     needs_ocr: bool
+    #: Confidence in the characters themselves; below 1.0 when read by OCR.
+    text_confidence: float
+    ocr_engine: str | None
     duration_ms: float
 
     @property
@@ -118,17 +126,49 @@ def analyse(
     plan = build_plan(actions, today=today, completed=completed)
 
     gaps = tuple(_gap(candidate, document) for candidate in rules.extract_gaps(text))
+    requirements = requirement_rules.group(
+        tuple(phrase for action in actions for phrase in action.requires)
+    )
 
     return Analysis(
         document_id=document_id or _fingerprint(text),
         title=_title(document),
+        document_type=_document_type(document),
         deadlines=deadlines,
         plan=plan,
         gaps=gaps,
+        requirements=requirements,
         source_kind=document.source_kind,
         page_count=document.page_count,
         needs_ocr=document.needs_ocr,
+        text_confidence=document.text_confidence,
+        ocr_engine=document.ocr_engine,
         duration_ms=round((perf_counter() - started) * 1000, 2),
+    )
+
+
+def _document_type(document: ParsedDocument) -> Claim[str]:
+    """Classify the document, as a claim like any other."""
+    result = classify(document.text)
+    confidence = _capped(result.confidence, document)
+    span = (
+        _span(*result.strongest_signal, document)
+        if result.strongest_signal
+        else None
+    )
+    classification = (
+        _classify_confidence(confidence) if span else ClaimClass.UNCERTAIN
+    )
+    # A type is always read off language rather than declared outright, so it
+    # is at best an inference even when the signal is unmistakable.
+    if classification is ClaimClass.FACT:
+        classification = ClaimClass.INFERENCE
+
+    return Claim[str](
+        value=TYPE_LABEL[result.document_type],
+        classification=classification,
+        confidence=Confidence(score=confidence, rationale=result.rationale),
+        evidence=span if classification is not ClaimClass.UNCERTAIN else None,
     )
 
 
@@ -140,6 +180,7 @@ def _build_actions(
     actions: list[Action] = []
     for index, candidate in enumerate(candidates):
         identifier = f"action-{index + 1}"
+        confidence = _capped(candidate.confidence, document)
         actions.append(
             Action(
                 id=identifier,
@@ -147,10 +188,10 @@ def _build_actions(
                 verb=candidate.verb,
                 claim=Claim[str](
                     value=candidate.description,
-                    classification=_classify(candidate.confidence),
+                    classification=_classify_confidence(confidence),
                     confidence=Confidence(
-                        score=candidate.confidence,
-                        rationale=candidate.rationale,
+                        score=confidence,
+                        rationale=candidate.rationale + _ocr_note(document),
                     ),
                     evidence=_span(candidate.char_start, candidate.char_end, document),
                 ),
@@ -255,8 +296,10 @@ def _deadline_claim(
     rationale = expression.rationale
     if expression.is_ambiguous and expression.alternate:
         rationale = f"{rationale} Alternate reading: {expression.alternate.isoformat()}."
+    rationale += _ocr_note(document)
 
-    classification = _classify(expression.confidence)
+    confidence = _capped(expression.confidence, document)
+    classification = _classify_confidence(confidence)
     if expression.kind is TemporalKind.RELATIVE and classification is ClaimClass.FACT:
         # A relative period is arithmetic over an assumed start date, which is
         # an inference no matter how clearly the period itself is stated.
@@ -265,7 +308,7 @@ def _deadline_claim(
     return Claim[date](
         value=expression.resolved,
         classification=classification,
-        confidence=Confidence(score=expression.confidence, rationale=rationale),
+        confidence=Confidence(score=confidence, rationale=rationale),
         evidence=_span(expression.char_start, expression.char_end, document),
     )
 
@@ -292,12 +335,32 @@ def _suggest(candidate: rules.GapCandidate) -> str:
     return "Contact the issuing department to confirm this detail."
 
 
-def _classify(confidence: float) -> ClaimClass:
+def _classify_confidence(confidence: float) -> ClaimClass:
     if confidence >= _FACT_THRESHOLD:
         return ClaimClass.FACT
     if confidence >= _UNCERTAIN_THRESHOLD:
         return ClaimClass.INFERENCE
     return ClaimClass.UNCERTAIN
+
+
+def _capped(confidence: float, document: ParsedDocument) -> float:
+    """Limit a claim's confidence by how well the text itself was read.
+
+    Certainty about a sentence cannot exceed certainty about its characters.
+    When a deadline is extracted from OCR output at 61% mean confidence, the
+    extraction rule's own 97% is not the honest number to report.
+    """
+    return round(min(confidence, document.text_confidence), 4)
+
+
+def _ocr_note(document: ParsedDocument) -> str:
+    if not document.is_ocr_derived:
+        return ""
+    percent = round(document.text_confidence * 100)
+    return (
+        f" Read by OCR at {percent}% character confidence, which caps how far "
+        "this can be trusted."
+    )
 
 
 def _span(start: int, end: int, document: ParsedDocument) -> EvidenceSpan:

@@ -1,6 +1,13 @@
 "use client";
 
-import type { Action, Analysis, Gap, Priority } from "@/lib/api";
+import type {
+  Action,
+  Analysis,
+  Gap,
+  Priority,
+  Requirement,
+  RequirementKind,
+} from "@/lib/api";
 import { describeSlack, formatDate } from "@/lib/api";
 import { ClaimTag } from "./ClaimTag";
 import styles from "./PlanPane.module.css";
@@ -31,7 +38,7 @@ const PRIORITY_LABEL: Record<Priority, string> = {
 };
 
 export interface Selection {
-  kind: "action" | "gap" | "deadline" | "title";
+  kind: "action" | "gap" | "deadline" | "title" | "type";
   id: string;
 }
 
@@ -90,10 +97,72 @@ export function PlanPane({
         )}
       </section>
 
+      {analysis.requirements.length > 0 && (
+        <RequirementSection requirements={analysis.requirements} />
+      )}
+
       {analysis.gaps.length > 0 && (
         <GapSection gaps={analysis.gaps} selection={selection} onSelect={onSelect} />
       )}
     </div>
+  );
+}
+
+const REQUIREMENT_GROUPS: { kind: RequirementKind; label: string; hint: string }[] = [
+  {
+    kind: "document",
+    label: "Papers to get",
+    hint: "Things you have to obtain before you can proceed",
+  },
+  {
+    kind: "information",
+    label: "Details to have ready",
+    hint: "Values you will be asked to supply",
+  },
+  {
+    kind: "condition",
+    label: "Conditions to meet",
+    hint: "Criteria you either satisfy or do not",
+  },
+  {
+    kind: "unclassified",
+    label: "Also mentioned",
+    hint: "Recognised as required, but not confidently sorted",
+  },
+];
+
+function RequirementSection({ requirements }: { requirements: Requirement[] }) {
+  const groups = REQUIREMENT_GROUPS.map((group) => ({
+    ...group,
+    items: requirements.filter((item) => item.kind === group.kind),
+  })).filter((group) => group.items.length > 0);
+
+  return (
+    <section className={styles.section} aria-labelledby="requirements-heading">
+      <div className={styles.sectionHead}>
+        <h2 id="requirements-heading" className={styles.sectionTitle}>
+          What you need
+        </h2>
+        <p className={styles.count}>{requirements.length}</p>
+      </div>
+
+      <div className={styles.reqGroups}>
+        {groups.map((group) => (
+          <div key={group.kind} className={styles.reqGroup}>
+            <h3 className={styles.reqGroupLabel} title={group.hint}>
+              {group.label}
+            </h3>
+            <ul className={styles.reqList}>
+              {group.items.map((item) => (
+                <li key={item.text} className={styles.reqItem}>
+                  {item.text}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -126,6 +195,23 @@ function Summary({
           />
         </button>
       )}
+
+      <button
+        type="button"
+        className={`${styles.docType} ${
+          selection?.kind === "type" ? styles.titleSelected : ""
+        }`}
+        onClick={() => onSelect({ kind: "type", id: "type" })}
+        title={analysis.document_type.rationale}
+      >
+        <span className={styles.factLabel}>Type</span>
+        <span className={styles.docTypeValue}>{analysis.document_type.value}</span>
+        <ClaimTag
+          classification={analysis.document_type.classification}
+          confidence={analysis.document_type.confidence}
+          size="small"
+        />
+      </button>
 
       <div className={styles.facts}>
         {deadline ? (
@@ -160,10 +246,22 @@ function Summary({
         </p>
       )}
 
+      {analysis.text_confidence < 1 && (
+        <p className={styles.notice} role="status">
+          <strong>
+            This document was read by OCR at{" "}
+            {Math.round(analysis.text_confidence * 100)}% character confidence.
+          </strong>{" "}
+          Nothing below is reported as more certain than the text it was read
+          from, so every finding here is capped at that figure.
+        </p>
+      )}
+
       {analysis.needs_ocr && (
         <p className={styles.notice} role="status">
-          <strong>This document has no readable text layer.</strong> It is
-          probably a scan. Nothing below could be extracted from it.
+          <strong>Some pages could not be read.</strong> They have no text layer
+          and OCR did not recover them, so anything stated only on those pages
+          is missing from this plan.
         </p>
       )}
 

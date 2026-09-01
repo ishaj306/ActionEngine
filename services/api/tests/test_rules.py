@@ -178,6 +178,35 @@ class TestActionExtraction:
         assert found
         assert found[0].description.startswith("Verify")
 
+    def test_a_listed_series_is_read_as_requirements_without_a_cue(self):
+        """Many notices list requirements as objects, with no "along with"."""
+        found = extract_actions(
+            "Students must upload their updated resume, a scanned copy of the "
+            "college identity card, and the internship offer letter."
+        )
+
+        assert found
+        joined = " | ".join(found[0].requires).lower()
+        assert "updated resume" in joined
+        assert "identity card" in joined
+
+    def test_a_dangling_participle_is_trimmed_from_a_requirement(self):
+        found = extract_actions(
+            "Students must upload their resume, the college ID card, and the "
+            "offer letter issued by the host organisation."
+        )
+
+        assert found
+        assert not any(item.endswith("issued") for item in found[0].requires)
+
+    def test_prose_with_one_comma_is_not_read_as_a_list(self):
+        """A single incidental comma must not manufacture requirements."""
+        found = extract_actions(
+            "The scholarship, funded by the trust, must be renewed annually."
+        )
+
+        assert all(item.requires == () for item in found)
+
     def test_prose_without_instructions_yields_no_actions(self):
         text = "The scholarship was instituted in 1998 and is funded by the trust."
 

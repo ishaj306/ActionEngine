@@ -15,6 +15,12 @@ from app.modules.ingestion.document import (
     from_text,
     parse,
 )
+from app.modules.ingestion.ocr import (
+    NullEngine,
+    OcrResult,
+    OcrUnavailable,
+    TesseractEngine,
+)
 
 
 class TestPlainText:
@@ -31,8 +37,9 @@ class TestPlainText:
         assert "Résumé" in document.text
 
     def test_binary_content_is_rejected_rather_than_mangled(self):
+        # A ZIP: binary, and not a format this engine claims to read.
         with pytest.raises(UnsupportedDocument, match="binary"):
-            parse(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00")
+            parse(b"PK\x03\x04\x14\x00\x00\x00\x08\x00" + bytes(64))
 
     def test_binary_without_null_bytes_is_still_rejected(self):
         """Regression: speculative UTF-16 decoding turned binary into text.
@@ -108,16 +115,121 @@ class TestPdf:
         writer.write(buffer)
         return buffer.getvalue()
 
-    def test_a_pdf_without_a_text_layer_is_flagged_for_ocr(self):
-        document = parse(self.build_pdf(["", ""]))
-
-        assert document.source_kind is SourceKind.SCANNED_PDF
-        assert document.needs_ocr
-        assert document.pages_needing_ocr == (1, 2)
+    def test_a_scanned_pdf_is_rejected_when_no_ocr_is_available(self):
+        """Better to refuse than to return an empty document as an analysis."""
+        with pytest.raises(UnsupportedDocument, match="no readable text layer"):
+            parse(self.build_pdf(["", ""]), ocr=NullEngine())
 
     def test_a_truncated_pdf_raises_a_clear_error(self):
         with pytest.raises(UnsupportedDocument):
             parse(b"%PDF-1.4\n truncated before the xref table")
+
+
+PNG_HEADER = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+
+
+class FakeOcrEngine:
+    """Stands in for Tesseract so the OCR paths are testable anywhere."""
+
+    name = "fake"
+
+    def __init__(self, text: str, confidence: float = 0.88) -> None:
+        self._text = text
+        self._confidence = confidence
+        self.calls = 0
+
+    def is_available(self) -> bool:
+        return True
+
+    def read(self, image: bytes) -> OcrResult:
+        self.calls += 1
+        _ = image
+        return OcrResult(text=self._text, confidence=self._confidence, engine=self.name)
+
+
+class TestImages:
+    def test_a_png_is_read_by_ocr(self):
+        engine = FakeOcrEngine("Submit the form before 18 September 2026.")
+
+        document = parse(PNG_HEADER, ocr=engine)
+
+        assert document.source_kind is SourceKind.IMAGE
+        assert "18 September" in document.text
+        assert engine.calls == 1
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            PNG_HEADER,
+            b"\xff\xd8\xff\xe0\x00\x10JFIF",
+            b"II*\x00\x08\x00\x00\x00",
+            b"RIFF\x00\x00\x00\x00WEBPVP8 ",
+        ],
+        ids=["png", "jpeg", "tiff", "webp"],
+    )
+    def test_image_formats_are_detected_by_magic_bytes(self, header):
+        document = parse(header, ocr=FakeOcrEngine("Submit the form by Friday."))
+
+        assert document.source_kind is SourceKind.IMAGE
+
+    def test_ocr_confidence_is_carried_on_the_document(self):
+        document = parse(
+            PNG_HEADER, ocr=FakeOcrEngine("Submit the form by Friday.", confidence=0.61)
+        )
+
+        assert document.text_confidence == 0.61
+        assert document.ocr_engine == "fake"
+        assert document.is_ocr_derived
+
+    def test_native_text_carries_full_confidence(self):
+        document = from_text("Submit the form by Friday.")
+
+        assert document.text_confidence == 1.0
+        assert not document.is_ocr_derived
+
+    def test_an_image_is_rejected_when_no_ocr_is_available(self):
+        with pytest.raises(UnsupportedDocument, match="OCR"):
+            parse(PNG_HEADER, ocr=NullEngine())
+
+    def test_illegible_ocr_output_is_rejected_rather_than_analysed(self):
+        """A 20%-confidence read is noise, and analysing noise invents findings."""
+        engine = FakeOcrEngine("rn1 5ubm1t f0rrn", confidence=0.2)
+
+        with pytest.raises(UnsupportedDocument, match="could not read"):
+            parse(PNG_HEADER, ocr=engine)
+
+    def test_empty_ocr_output_is_rejected(self):
+        with pytest.raises(UnsupportedDocument, match="could not read"):
+            parse(PNG_HEADER, ocr=FakeOcrEngine("   ", confidence=0.95))
+
+
+class TestOcrEngines:
+    def test_the_null_engine_refuses_rather_than_returning_nothing(self):
+        with pytest.raises(OcrUnavailable):
+            NullEngine().read(PNG_HEADER)
+
+    def test_the_null_engine_reports_itself_unavailable(self):
+        assert NullEngine().is_available() is False
+
+    def test_tesseract_availability_tracks_the_binary_not_the_wrapper(self):
+        """pytesseract imports fine without Tesseract and fails only at call time."""
+        import shutil
+
+        engine = TesseractEngine()
+
+        assert engine.is_available() == (shutil.which("tesseract") is not None)
+
+    def test_an_unavailable_tesseract_raises_rather_than_returning_empty_text(self):
+        engine = TesseractEngine()
+        if engine.is_available():
+            pytest.skip("Tesseract is installed in this environment")
+
+        with pytest.raises(OcrUnavailable, match="not installed"):
+            engine.read(PNG_HEADER)
+
+    def test_a_result_below_the_usable_threshold_is_not_usable(self):
+        assert not OcrResult("some text", 0.3, "fake").is_usable
+        assert OcrResult("some text", 0.9, "fake").is_usable
 
 
 def test_document_must_have_at_least_one_page():

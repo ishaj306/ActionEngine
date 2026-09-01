@@ -164,6 +164,9 @@ _ABBREVIATIONS = frozenset(
 #: Sentences shorter than this are headings or fragments, not instructions.
 _MIN_SENTENCE_CHARS = 18
 
+#: Most requirements pulled from a single sentence.
+_MAX_REQUIREMENTS = 8
+
 #: Longest rewritten instruction shown to the reader.
 _MAX_DESCRIPTION_CHARS = 160
 
@@ -304,6 +307,7 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
         return None
 
     verb, base = _VERB_OF[verb_match.group(1)]
+    verb_end = (prefix.end() if prefix else 0) + verb_match.end()
     confidence = obligation_score or 0.78
     rationale = (
         "Sentence states an obligation using a modal verb."
@@ -318,32 +322,81 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
         char_end=sentence.char_end,
         confidence=confidence,
         rationale=rationale,
-        requires=_requirements_in(sentence.text),
+        requires=_requirements_in(sentence.text, verb_end),
     )
 
 
-def _requirements_in(sentence: str) -> tuple[str, ...]:
-    """Pull the noun phrases following a requirement cue."""
+def _requirements_in(sentence: str, verb_end: int = 0) -> tuple[str, ...]:
+    """Pull the things the sentence demands.
+
+    Two shapes. Most notices flag them with a cue -- "along with", "enclosing".
+    The rest simply list them as objects of the instruction: "upload your
+    resume, a copy of your ID card, and the offer letter". Reading only the
+    cued form misses every requirement in the second kind of sentence.
+    """
     items: list[str] = []
     for cue in _REQUIREMENT_CUES.finditer(sentence):
-        tail = sentence[cue.end() :]
-        tail = re.split(r"\b(?:before|by|to\s+the|on\s+or\s+before)\b", tail, maxsplit=1)[0]
+        tail = _before_trailing_clause(sentence[cue.end() :])
         for part in re.split(r",|\band\b|\bor\b|/|;", tail):
             cleaned = _clean_requirement(part)
             if cleaned and cleaned.lower() not in {item.lower() for item in items}:
                 items.append(cleaned)
-    return tuple(items[:8])
+
+    if items:
+        return tuple(items[:_MAX_REQUIREMENTS])
+    return _series_after_verb(sentence, verb_end)
+
+
+def _series_after_verb(sentence: str, verb_end: int) -> tuple[str, ...]:
+    """Read a comma-separated list of objects following the instruction's verb.
+
+    Requires both a comma and a coordinating conjunction, so ordinary prose
+    with one incidental comma is not mistaken for a list of documents.
+    """
+    tail = _before_trailing_clause(sentence[verb_end:])
+    if "," not in tail or not re.search(r"\b(?:and|or)\b", tail):
+        return ()
+
+    found: list[str] = []
+    for part in re.split(r",|\band\b|\bor\b|;", tail):
+        cleaned = _clean_requirement(part)
+        if cleaned and cleaned.lower() not in {item.lower() for item in found}:
+            found.append(cleaned)
+    return tuple(found[:_MAX_REQUIREMENTS]) if len(found) >= 2 else ()
+
+
+def _before_trailing_clause(tail: str) -> str:
+    """Cut at the preposition that ends the list and begins the destination."""
+    return re.split(
+        r"\b(?:before|by|to\s+the|on\s+or\s+before|through|via|at\s+the)\b",
+        tail,
+        maxsplit=1,
+    )[0]
 
 
 def _clean_requirement(fragment: str) -> str | None:
     text = re.sub(r"\b(?:their|his|her|the|a|an|its|your)\b", " ", fragment, flags=re.I)
     text = re.sub(r"[^\w\s./-]", " ", text)
     text = " ".join(text.split())
+    text = _trim_dangling_participle(text)
     if not 3 <= len(text) <= 60:
         return None
     if not re.search(r"[A-Za-z]{3}", text):
         return None
     return text[:1].upper() + text[1:]
+
+
+def _trim_dangling_participle(text: str) -> str:
+    """Drop a trailing participle left behind when its clause was cut.
+
+    "the offer letter issued by the host organisation" is truncated at "by",
+    leaving "offer letter issued". The participle modified the clause that is
+    now gone, so it only reads as noise on a checklist.
+    """
+    words = text.split()
+    if len(words) >= 3 and re.fullmatch(r"\w+(?:ed|ing)", words[-1], re.I):
+        return " ".join(words[:-1])
+    return text
 
 
 def _as_instruction(sentence: str, base_verb: str) -> str:

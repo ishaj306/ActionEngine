@@ -13,6 +13,7 @@ import pytest
 
 from app.domain.claims import ClaimClass
 from app.modules.action_engine.planner import ActionVerb, Priority
+from app.modules.extraction.requirements import RequirementKind
 from app.modules.ingestion.document import from_text
 from app.pipeline import analyse
 
@@ -148,6 +149,89 @@ class TestGaps:
 
     def test_unresolved_count_reflects_open_questions(self, analysis):
         assert analysis.unresolved_count >= len(analysis.gaps)
+
+
+class TestDocumentType:
+    def test_a_notice_is_classified(self, analysis):
+        assert analysis.document_type.value == "Notice"
+
+    def test_the_type_is_never_asserted_as_a_bare_fact(self, analysis):
+        """A type is read off language, so it is an inference at best."""
+        assert analysis.document_type.classification is not ClaimClass.FACT
+
+    def test_the_type_cites_the_language_that_identified_it(self, analysis):
+        claim = analysis.document_type
+
+        if claim.classification is not ClaimClass.UNCERTAIN:
+            assert claim.evidence is not None
+            assert claim.evidence.text.strip()
+
+
+class TestRequirements:
+    def test_requirements_are_grouped_by_kind(self, analysis):
+        kinds = {item.kind for item in analysis.requirements}
+
+        assert RequirementKind.DOCUMENT in kinds
+
+    def test_the_income_certificate_is_a_document_to_fetch(self, analysis):
+        documents = [
+            item.text.lower()
+            for item in analysis.requirements
+            if item.kind is RequirementKind.DOCUMENT
+        ]
+
+        assert any("income certificate" in text for text in documents)
+
+    def test_requirements_are_deduplicated_across_actions(self, analysis):
+        texts = [item.text.lower() for item in analysis.requirements]
+
+        assert len(texts) == len(set(texts))
+
+
+class TestOcrConfidence:
+    """Certainty about a sentence cannot exceed certainty about its characters."""
+
+    @staticmethod
+    def ocr_document(text: str, confidence: float):
+        from dataclasses import replace
+
+        from app.modules.ingestion.document import SourceKind
+
+        return replace(
+            from_text(text),
+            source_kind=SourceKind.IMAGE,
+            text_confidence=confidence,
+            ocr_engine="fake",
+        )
+
+    def test_a_clean_read_leaves_confidence_untouched(self):
+        result = analyse(self.ocr_document(SCHOLARSHIP_NOTICE, 1.0), today=TODAY)
+
+        assert result.primary_deadline is not None
+        assert result.primary_deadline.confidence.score > 0.9
+
+    def test_a_poor_read_caps_every_derived_claim(self):
+        result = analyse(self.ocr_document(SCHOLARSHIP_NOTICE, 0.61), today=TODAY)
+
+        assert result.primary_deadline is not None
+        assert result.primary_deadline.confidence.score <= 0.61
+        for item in result.plan.scheduled:
+            assert item.action.claim.confidence.score <= 0.61
+
+    def test_a_poor_read_demotes_a_stated_fact_to_an_inference(self):
+        clean = analyse(from_text(SCHOLARSHIP_NOTICE), today=TODAY)
+        scanned = analyse(self.ocr_document(SCHOLARSHIP_NOTICE, 0.61), today=TODAY)
+
+        assert clean.primary_deadline is not None
+        assert scanned.primary_deadline is not None
+        assert clean.primary_deadline.classification is ClaimClass.FACT
+        assert scanned.primary_deadline.classification is not ClaimClass.FACT
+
+    def test_the_rationale_says_the_text_came_from_ocr(self):
+        result = analyse(self.ocr_document(SCHOLARSHIP_NOTICE, 0.61), today=TODAY)
+
+        assert result.primary_deadline is not None
+        assert "ocr" in result.primary_deadline.confidence.rationale.lower()
 
 
 class TestDocumentMetadata:

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.domain.claims import Claim, ClaimClass, InformationGap
 from app.domain.span import EvidenceSpan
 from app.modules.action_engine.planner import ScheduledAction
+from app.modules.extraction.requirements import Requirement
 from app.pipeline import Analysis
 
 
@@ -114,20 +115,34 @@ class GapOut(BaseModel):
         )
 
 
+class RequirementOut(BaseModel):
+    text: str
+    kind: str
+
+    @classmethod
+    def of(cls, requirement: Requirement) -> RequirementOut:
+        return cls(text=requirement.text, kind=requirement.kind.value)
+
+
 class AnalysisOut(BaseModel):
     document_id: str
     filename: str
     title: ClaimOut | None
+    document_type: ClaimOut
     primary_deadline: ClaimOut | None
     deadlines: list[ClaimOut]
     actions: list[ActionOut]
     gaps: list[GapOut]
+    requirements: list[RequirementOut]
     #: False when a prerequisite cannot finish in time for what depends on it.
     is_feasible: bool
     unresolved_count: int
     page_count: int
     source_kind: str
     needs_ocr: bool
+    #: Confidence in the characters themselves; below 1.0 when read by OCR.
+    text_confidence: float
+    ocr_engine: str | None
     #: Ordering contradictions the extractor produced, surfaced not hidden.
     broken_cycles: list[list[str]]
     duration_ms: float
@@ -141,6 +156,7 @@ class AnalysisOut(BaseModel):
             document_id=analysis.document_id,
             filename=filename,
             title=ClaimOut.of(analysis.title) if analysis.title else None,
+            document_type=ClaimOut.of(analysis.document_type),
             primary_deadline=(
                 ClaimOut.of(analysis.primary_deadline)
                 if analysis.primary_deadline
@@ -149,11 +165,14 @@ class AnalysisOut(BaseModel):
             deadlines=[ClaimOut.of(claim) for claim in analysis.deadlines],
             actions=[ActionOut.of(item) for item in analysis.plan.scheduled],
             gaps=[GapOut.of(gap) for gap in analysis.gaps],
+            requirements=[RequirementOut.of(item) for item in analysis.requirements],
             is_feasible=analysis.plan.is_feasible,
             unresolved_count=analysis.unresolved_count,
             page_count=analysis.page_count,
             source_kind=analysis.source_kind.value,
             needs_ocr=analysis.needs_ocr,
+            text_confidence=analysis.text_confidence,
+            ocr_engine=analysis.ocr_engine,
             broken_cycles=[list(pair) for pair in analysis.plan.broken_cycles],
             duration_ms=analysis.duration_ms,
             text=text,

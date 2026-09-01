@@ -57,19 +57,37 @@ export interface Gap {
   evidence: Evidence | null;
 }
 
+export const REQUIREMENT_KINDS = [
+  "document",
+  "information",
+  "condition",
+  "unclassified",
+] as const;
+export type RequirementKind = (typeof REQUIREMENT_KINDS)[number];
+
+export interface Requirement {
+  text: string;
+  kind: RequirementKind;
+}
+
 export interface Analysis {
   document_id: string;
   filename: string;
   title: Claim | null;
+  document_type: Claim;
   primary_deadline: Claim | null;
   deadlines: Claim[];
   actions: Action[];
   gaps: Gap[];
+  requirements: Requirement[];
   is_feasible: boolean;
   unresolved_count: number;
   page_count: number;
   source_kind: string;
   needs_ocr: boolean;
+  /** Confidence in the characters themselves; below 1 when read by OCR. */
+  text_confidence: number;
+  ocr_engine: string | null;
   broken_cycles: string[][];
   duration_ms: number;
   text: string;
