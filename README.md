@@ -52,6 +52,11 @@ submission that depends on it.
 answer, and the engine says so rather than quietly dropping it. Detection is
 deliberately conservative: a false gap teaches the reader to ignore the panel.
 
+**Uncertainty compounds honestly.** Certainty about a sentence cannot exceed
+certainty about its characters. When a page is read by OCR at 61% mean
+confidence, every claim drawn from it is capped there — a deadline that would
+be a 97% `FACT` in a native PDF comes back as an `INFERENCE`, and says why.
+
 ---
 
 ## What is deterministic and what is not
@@ -63,11 +68,29 @@ are invisible in the output and wrong about half the time.
 | Stage | Implementation | Why |
 | --- | --- | --- |
 | Ingestion, page mapping | Deterministic | Offsets must be exact or every citation is wrong |
+| OCR | Swappable engine | Local for privacy, cloud for accuracy; must refuse when it cannot run |
 | Date resolution | Deterministic | One correct answer; must be reproducible |
+| Classification | Weighted lexical | Cheap, inspectable, and its margin *is* its confidence |
 | Dependency graph, scheduling | Deterministic | Topological order and slack are arithmetic |
 | Evidence anchoring | Fuzzy match, scored | Models quote approximately; the score travels with the span |
 | Action & requirement extraction | Rules today, hybrid next | The rule arm is the evaluation baseline, not a stub |
 | Relevance, ambiguity | Model (next phase) | No rule-based answer exists |
+
+## OCR
+
+`modules/ingestion/ocr.py` defines an `OcrEngine` protocol with a Tesseract
+implementation and a null engine. Availability is checked against the binary on
+`PATH`, not the Python wrapper, because `pytesseract` imports cleanly without
+Tesseract installed and fails only at call time.
+
+An unavailable engine raises. It never returns empty text — that would present
+a scan the system could not read as a document containing nothing, which is the
+exact failure everything else here is built to prevent. Scanned PDF pages are
+read from the images already embedded in the file rather than adding a second
+PDF library purely to redraw what is already there.
+
+Install Tesseract to enable it; without it, images and scans are refused with a
+reason rather than silently producing an empty plan.
 
 `03/04/2026` comes back flagged with **both** readings and a confidence of 0.45,
 not silently disambiguated.
@@ -110,7 +133,7 @@ chosen to flatter the engine — the first hides a prerequisite that no longer
 fits its deadline, the second is vague in three places.
 
 ```bash
-cd services/api && python -m pytest -q     # 163 tests
+cd services/api && python -m pytest -q     # 222 tests
 ```
 
 ---
@@ -121,9 +144,9 @@ cd services/api && python -m pytest -q     # 163 tests
 services/api/app/
   domain/           claims, spans — the epistemic types everything else returns
   modules/
-    ingestion/      parse → text + page map
+    ingestion/      parse → text + page map; OCR behind an engine protocol
     evidence/       offset-preserving normalization, fuzzy span anchoring
-    extraction/     temporal (deterministic), rules (baseline + fallback)
+    extraction/     temporal, classification, requirements, rules (baseline)
     action_engine/  dependency graph, backward scheduling, priority
   pipeline.py       composes the stages into one Analysis
   api/              wire format; enforces the serialization invariant
@@ -145,14 +168,20 @@ certainty, so meaning survives greyscale, colour blindness and a screen reader.
 
 ## Status
 
-Working end to end: ingestion, temporal extraction, rule-based action and gap
-extraction, dependency scheduling, evidence anchoring, API, and the workspace
-interface. 163 tests.
+**MVP scope is complete.** PDF, image and text ingestion with OCR; document
+classification; deadline, requirement, action and gap extraction; the four-state
+epistemic model; per-claim evidence anchoring; dependency-aware scheduling; the
+HTTP API; and the workspace interface. 222 tests.
 
-Next, in order: the model extraction arm behind the same `Claim` contract with a
-verification pass that demotes any claim its cited span does not entail; the
+Next, in order: the model extraction arm behind the same `Claim` contract, with
+a verification pass that demotes any claim its cited span does not entail; the
 annotated benchmark and the rules-vs-model-vs-hybrid ablation; Postgres behind
 the existing `Store` boundary; then document change detection.
+
+One limitation worth naming: a deadline is attached to an action only when it
+appears in that action's own sentence. Linking a date across sentences is
+exactly the confident guess this engine avoids making by rule, and is the
+model stage's job.
 
 Design rationale, competitive analysis and the full roadmap are in
 [`strategy.html`](strategy.html).
