@@ -1,0 +1,497 @@
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--paper);
+}
+
+/* ---------- summary ---------- */
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 24px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.titleButton,
+.deadline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  margin: -6px -8px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  min-height: 24px;
+}
+
+.titleButton:hover,
+.deadline:hover {
+  background: var(--surface-sunken);
+}
+
+.titleSelected,
+.deadlineSelected {
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.docTitle {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.28;
+  min-width: 0;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.deadline {
+  cursor: pointer;
+}
+
+.deadline:not(button) {
+  cursor: default;
+}
+
+.factLabel {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.deadlineDate {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+
+.noDeadline {
+  font-size: 15px;
+  color: var(--ink-tertiary);
+}
+
+.infeasible,
+.notice {
+  padding: 11px 13px;
+  border: 1px solid var(--missing-line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--missing-wash);
+  color: var(--ink-secondary);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.infeasible strong,
+.notice strong {
+  color: var(--missing);
+  font-weight: 600;
+}
+
+.notice {
+  border-color: var(--uncertain-line);
+  border-left-color: var(--uncertain);
+  background: var(--uncertain-wash);
+}
+
+.notice strong {
+  color: var(--uncertain);
+}
+
+/* ---------- sections ---------- */
+
+.section {
+  padding: 20px 24px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.section:last-child {
+  border-bottom: 0;
+  padding-bottom: 40px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sectionTitle {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-quaternary);
+}
+
+.empty {
+  padding: 16px 0;
+  color: var(--ink-tertiary);
+  font-size: 14px;
+  max-width: 52ch;
+}
+
+/* ---------- action rows ---------- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 12px;
+  padding: 12px 14px 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-low);
+  overflow: hidden;
+}
+
+/* Priority reads as a stripe *and* as the text label in the row head, so the
+   colour is never the only carrier. */
+.stripe {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--line-strong);
+}
+
+.row[data-priority="overdue"] .stripe,
+.row[data-priority="critical"] .stripe {
+  background: var(--missing);
+}
+
+.row[data-priority="high"] .stripe {
+  background: var(--uncertain);
+}
+
+.row[data-priority="medium"] .stripe {
+  background: var(--ink-quaternary);
+}
+
+.done {
+  opacity: 0.55;
+}
+
+.done .description {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-quaternary);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 1px;
+}
+
+/* The control is 16px visually but its label expands the hit target to 24px,
+   so there is no dead zone around it. */
+.checkbox {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.checkLabel {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -4px;
+  cursor: pointer;
+}
+
+.checkLabel::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  transition:
+    background-color 100ms ease-out,
+    border-color 100ms ease-out;
+}
+
+.checkLabel:hover::before {
+  border-color: var(--ink-tertiary);
+}
+
+.checkbox:checked + .checkLabel::before {
+  background: var(--fact);
+  border-color: var(--fact);
+}
+
+.checkbox:checked + .checkLabel::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 5px;
+  border-left: 1.75px solid var(--surface);
+  border-bottom: 1.75px solid var(--surface);
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.checkbox:focus-visible + .checkLabel::before {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rowButton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 2px 6px 4px;
+  margin: -2px -6px -4px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  width: 100%;
+}
+
+.rowButton:hover {
+  background: var(--surface-sunken);
+}
+
+.rowHead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.verb {
+  counter-increment: step;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.verb::before {
+  content: counter(step) ". ";
+  color: var(--ink-quaternary);
+}
+
+.priority {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-tertiary);
+}
+
+.row[data-priority="overdue"] .priority,
+.row[data-priority="critical"] .priority {
+  color: var(--missing);
+}
+
+.row[data-priority="high"] .priority {
+  color: var(--uncertain);
+}
+
+.description {
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  overflow-wrap: break-word;
+}
+
+.schedule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 12.5px;
+}
+
+.startBy {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.slack {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-tertiary);
+}
+
+.row[data-priority="overdue"] .slack {
+  color: var(--missing);
+}
+
+/* The inherited-deadline note is the least obvious and most valuable thing on
+   the row, so it gets its own line rather than being crowded onto one. */
+.inherited {
+  flex-basis: 100%;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.evidenceCue {
+  font-size: 11.5px;
+  color: var(--ink-quaternary);
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.rowButton:hover .evidenceCue,
+.rowButton:focus-visible .evidenceCue,
+.rowButton[aria-pressed="true"] .evidenceCue {
+  opacity: 1;
+}
+
+.rowButton[aria-pressed="true"] {
+  background: var(--surface-sunken);
+}
+
+.rowButton[aria-pressed="true"] .evidenceCue {
+  color: var(--ink-secondary);
+  font-weight: 500;
+}
+
+.requires,
+.blocked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+.metaLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-quaternary);
+  align-self: center;
+}
+
+.blocked {
+  color: var(--uncertain);
+}
+
+/* ---------- gaps ---------- */
+
+.gapList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gapItem {
+  display: flex;
+}
+
+.gapButton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--missing);
+  border-radius: var(--radius-lg);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-low);
+}
+
+.gapButton:hover,
+.gapSelected {
+  background: var(--surface-sunken);
+}
+
+.gapSelected {
+  border-color: var(--line-strong);
+  border-left-color: var(--missing);
+}
+
+.gapHead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gapQuestion {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.gapWhy {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+  max-width: 54ch;
+}
+
+.gapNext {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 12.5px;
+  color: var(--ink-secondary);
+}
+
+@media (max-width: 900px) {
+  .summary,
+  .section {
+    padding-inline: 18px;
+  }
+}

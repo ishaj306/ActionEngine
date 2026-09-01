@@ -1,0 +1,116 @@
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-tertiary);
+}
+
+.page {
+  color: var(--ink-secondary);
+  font-weight: 500;
+}
+
+.offsets {
+  font-variant-numeric: tabular-nums;
+}
+
+.approx {
+  color: var(--uncertain);
+}
+
+.hint {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--ink-quaternary);
+}
+
+.dot {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--ink-quaternary);
+  flex: none;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 26px 22px 48px;
+}
+
+.text {
+  max-width: 62ch;
+  font-family: var(--font-doc);
+  font-size: 16px;
+  line-height: 1.72;
+  color: var(--ink-secondary);
+  /* The document is shown as written -- line breaks in a notice carry layout
+     information, and collapsing them would misrepresent the source. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  transition: color 140ms ease-out;
+}
+
+/* When a span is marked, the surrounding text recedes so the eye lands on the
+   evidence without the rest becoming unreadable. */
+.dimmed .text {
+  color: var(--ink-quaternary);
+}
+
+.mark {
+  background: var(--highlight);
+  color: var(--ink);
+  padding: 1px 0;
+  box-shadow:
+    0 0 0 2px var(--highlight),
+    inset 0 -1px 0 var(--highlight-strong);
+  border-radius: 2px;
+  scroll-margin-block: 40%;
+}
+
+.dimmed .mark {
+  color: var(--highlight-ink);
+}
+
+@media (max-width: 900px) {
+  .pane {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .scroll {
+    padding: 20px 18px 32px;
+    max-height: 46dvh;
+  }
+}

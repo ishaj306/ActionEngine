@@ -92,6 +92,76 @@ class TestActionExtraction:
 
         assert "income certificate" in joined
 
+    @pytest.mark.parametrize(
+        ("sentence", "expected"),
+        [
+            ("Registrations must be completed within 10 days.", ActionVerb.PREPARE),
+            ("The form must be submitted to the office.", ActionVerb.SUBMIT),
+            ("Eligibility must be verified before applying.", ActionVerb.CONFIRM),
+            ("A certificate must be obtained from the Tehsildar.", ActionVerb.OBTAIN),
+            ("Documents should be uploaded to the portal.", ActionVerb.SUBMIT),
+            (
+                "Students are required to register for the programme.",
+                ActionVerb.SUBMIT,
+            ),
+            ("Candidates must enrol before the last date.", ActionVerb.SUBMIT),
+        ],
+    )
+    def test_passive_and_inflected_verbs_are_recognised(self, sentence, expected):
+        """Notices are written in the passive far more often than the imperative.
+
+        Matching only base forms missed "must be completed" entirely, which is
+        how most obligations in real notices are phrased.
+        """
+        found = extract_actions(sentence)
+
+        assert found, f"no action extracted from {sentence!r}"
+        assert found[0].verb is expected
+
+    @pytest.mark.parametrize(
+        ("sentence", "expected"),
+        [
+            (
+                "Registrations must be completed within 10 days.",
+                "Complete registrations within 10 days",
+            ),
+            (
+                "The form must be submitted to the office.",
+                "Submit the form to the office",
+            ),
+            (
+                "Eligibility must be verified before applying.",
+                "Verify eligibility before applying",
+            ),
+        ],
+    )
+    def test_passive_sentences_are_rewritten_as_instructions(self, sentence, expected):
+        """Deleting the modal alone leaves a fragment, not an instruction.
+
+        "Registrations must be completed" became "Completed within 10 days",
+        which reads as a status rather than something to do.
+        """
+        found = extract_actions(sentence)
+
+        assert found
+        assert found[0].description == expected
+
+    def test_instructions_address_the_reader_directly(self):
+        """The notice writes about students; the plan writes to one."""
+        found = extract_actions("Students must upload their updated resume.")
+
+        assert found
+        assert found[0].description == "Upload your updated resume"
+
+    def test_a_long_subject_is_dropped_rather_than_folded_in(self):
+        found = extract_actions(
+            "All third-year students enrolled in the Computer Science programme "
+            "must be verified before the deadline."
+        )
+
+        assert found
+        assert found[0].description.startswith("Verify")
+
     def test_prose_without_instructions_yields_no_actions(self):
         text = "The scholarship was instituted in 1998 and is funded by the trust."
 

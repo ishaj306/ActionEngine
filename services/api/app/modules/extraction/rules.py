@@ -27,8 +27,11 @@ _VERB_LEXICON: dict[ActionVerb, frozenset[str]] = {
         "complete fill prepare scan update review sign attach enclose compile"
         " affix write".split()
     ),
+    # Registering is the act of applying, not the act of showing up, so it
+    # belongs to the stage that hands something over.
     ActionVerb.SUBMIT: frozenset(
-        "submit upload send deposit pay forward return apply furnish".split()
+        "submit upload send deposit pay forward return apply furnish register"
+        " enrol enroll remit".split()
     ),
     ActionVerb.ATTEND: frozenset(
         "attend appear report participate join present".split()
@@ -38,8 +41,58 @@ _VERB_LEXICON: dict[ActionVerb, frozenset[str]] = {
     ),
 }
 
-_VERB_OF: dict[str, ActionVerb] = {
-    word: verb for verb, words in _VERB_LEXICON.items() for word in words
+#: Forms that regular inflection gets wrong.
+_IRREGULAR: dict[str, tuple[str, ...]] = {
+    "pay": ("paid",),
+    "get": ("got",),
+    "draw": ("drew", "drawn"),
+    "send": ("sent",),
+    "write": ("wrote", "written"),
+}
+
+_VOWELS = frozenset("aeiou")
+
+
+def _inflect(verb: str) -> set[str]:
+    """Generate the inflected forms of one verb.
+
+    Notices are written in the passive far more often than the imperative --
+    "registrations must be completed", not "complete your registration" -- so
+    matching only base forms misses most of the instructions in a document.
+    English morphology for a closed set of verbs is small enough to enumerate
+    and far more predictable than stemming the input.
+    """
+    forms = {verb, f"{verb}s"}
+    forms.update(_IRREGULAR.get(verb, ()))
+
+    if verb.endswith("e"):
+        stem = verb[:-1]
+        forms.update({f"{stem}ed", f"{stem}ing"})
+    elif len(verb) > 2 and verb.endswith("y") and verb[-2] not in _VOWELS:
+        stem = verb[:-1]
+        forms.update({f"{stem}ied", f"{stem}ies", f"{verb}ing"})
+    elif (
+        len(verb) >= 3
+        and verb[-1] not in _VOWELS
+        and verb[-1] not in "wxy"
+        and verb[-2] in _VOWELS
+        and verb[-3] not in _VOWELS
+    ):
+        # Consonant-vowel-consonant doubles the final letter: submit, submitted.
+        doubled = verb + verb[-1]
+        forms.update({f"{doubled}ed", f"{doubled}ing"})
+    else:
+        forms.update({f"{verb}ed", f"{verb}ing"})
+    return forms
+
+
+#: Maps every inflected form to its bucket *and* its base form. The base is
+#: needed to rewrite a passive sentence back into an instruction.
+_VERB_OF: dict[str, tuple[ActionVerb, str]] = {
+    form: (verb, word)
+    for verb, words in _VERB_LEXICON.items()
+    for word in words
+    for form in _inflect(word)
 }
 
 _VERB_ALT = "|".join(sorted(_VERB_OF, key=len, reverse=True))
@@ -110,6 +163,28 @@ _ABBREVIATIONS = frozenset(
 
 #: Sentences shorter than this are headings or fragments, not instructions.
 _MIN_SENTENCE_CHARS = 18
+
+#: Longest rewritten instruction shown to the reader.
+_MAX_DESCRIPTION_CHARS = 160
+
+#: A subject longer than this is a clause, not a noun phrase, and folding it
+#: back into an imperative produces something worse than the original.
+_MAX_SUBJECT_CHARS = 48
+
+#: Matches everything up to and including the obligation marker, capturing the
+#: subject that precedes it.
+_OBLIGATION_PREFIX = re.compile(
+    r"^(?P<subject>.*?)\b(?:must|shall|should|needs?\s+to|are\s+required\s+to|"
+    r"is\s+required\s+to|have\s+to|has\s+to|are\s+advised\s+to|"
+    r"are\s+requested\s+to|kindly|please)\s+",
+    re.I,
+)
+
+#: "be completed", "been submitted" -- the passive that follows the modal.
+_PASSIVE_HEAD = re.compile(r"^(?:be|been|being)\s+\w+\s*", re.I)
+
+#: Third-person possessives, rewritten to address the reader.
+_THIRD_PERSON = re.compile(r"\b(?:their|his/her|his or her|his|her)\b", re.I)
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,11 +291,19 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
     if not obligation_score and not imperative:
         return None
 
-    verb_match = re.search(rf"\b({_VERB_ALT})\b", lowered)
+    # Look for the verb the obligation governs, not merely the leftmost verb in
+    # the sentence. In "students enrolled in the programme must be verified",
+    # "enrolled" describes the subject and "verified" is the instruction.
+    scope = lowered
+    prefix = _OBLIGATION_PREFIX.match(sentence.text) if obligation_score else None
+    if prefix:
+        scope = lowered[prefix.end() :]
+
+    verb_match = re.search(rf"\b({_VERB_ALT})\b", scope)
     if not verb_match:
         return None
 
-    verb = _VERB_OF[verb_match.group(1)]
+    verb, base = _VERB_OF[verb_match.group(1)]
     confidence = obligation_score or 0.78
     rationale = (
         "Sentence states an obligation using a modal verb."
@@ -229,7 +312,7 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
     )
 
     return ActionCandidate(
-        description=_as_instruction(sentence.text),
+        description=_as_instruction(sentence.text, base),
         verb=verb,
         char_start=sentence.char_start,
         char_end=sentence.char_end,
@@ -263,21 +346,44 @@ def _clean_requirement(fragment: str) -> str | None:
     return text[:1].upper() + text[1:]
 
 
-def _as_instruction(sentence: str) -> str:
-    """Compress a notice sentence into an imperative the reader can act on."""
+def _as_instruction(sentence: str, base_verb: str) -> str:
+    """Rewrite a notice sentence as an imperative the reader can act on.
+
+    The passive case is the one that matters. Notices overwhelmingly say
+    "registrations must be completed", and simply deleting the modal leaves
+    "completed within 10 days", which is not an instruction and reads as a
+    fragment. Restoring the subject as the object -- "complete registrations
+    within 10 days" -- keeps the meaning the passive construction carried.
+    """
     text = " ".join(sentence.split())
-    text = re.sub(
-        r"^.*?\b(?:must|shall|should|needs?\s+to|are\s+required\s+to|is\s+required\s+to|"
-        r"have\s+to|has\s+to|are\s+advised\s+to|are\s+requested\s+to|kindly|please)\s+",
-        "",
-        text,
-        flags=re.I,
-    )
-    text = re.sub(r"^(?:be\s+)?", "", text, flags=re.I)
-    text = text.rstrip(".;: ")
-    if not text:
-        return " ".join(sentence.split())[:120]
-    return text[:1].upper() + text[1:]
+    match = _OBLIGATION_PREFIX.match(text)
+    if not match:
+        return _tidy(text, fallback=text)
+
+    subject = match.group("subject").strip(" ,;:")
+    remainder = text[match.end() :]
+
+    passive = _PASSIVE_HEAD.match(remainder)
+    if passive:
+        tail = remainder[passive.end() :]
+        if subject and len(subject) <= _MAX_SUBJECT_CHARS:
+            rebuilt = f"{base_verb} {subject[:1].lower()}{subject[1:]} {tail}"
+        else:
+            rebuilt = f"{base_verb} {tail}"
+        return _tidy(rebuilt, fallback=text)
+
+    return _tidy(remainder, fallback=text)
+
+
+def _tidy(text: str, *, fallback: str) -> str:
+    cleaned = " ".join(text.split()).rstrip(".;:, ")
+    if not cleaned:
+        return fallback[:_MAX_DESCRIPTION_CHARS]
+    # The notice addresses students in the third person; the plan addresses the
+    # reader directly, so "submit their form" becomes "submit your form".
+    cleaned = _THIRD_PERSON.sub("your", cleaned)
+    cleaned = cleaned[:_MAX_DESCRIPTION_CHARS].rstrip()
+    return cleaned[:1].upper() + cleaned[1:]
 
 
 def _is_resolved_nearby(text: str, match: re.Match[str], pattern: re.Pattern[str]) -> bool:
