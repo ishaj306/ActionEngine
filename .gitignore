@@ -33,3 +33,7 @@ Thumbs.db
 
 # Local agent state
 .claude/settings.local.json
+
+# Strategy document — kept locally, published separately rather than shipped
+# with the source.
+strategy.html

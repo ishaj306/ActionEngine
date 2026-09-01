@@ -270,5 +270,5 @@ a verification pass that demotes any claim its cited span does not entail; the
 annotated benchmark and the rules-vs-model-vs-hybrid ablation; then Postgres
 behind the existing `Store` boundary.
 
-Design rationale, competitive analysis and the full roadmap are in
-[`strategy.html`](strategy.html).
+The design rationale, competitive analysis and full roadmap live in a separate
+strategy document, published rather than checked in.
