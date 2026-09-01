@@ -5,11 +5,14 @@ import type {
   Analysis,
   Gap,
   Priority,
+  Profile,
   Requirement,
   RequirementKind,
 } from "@/lib/api";
 import { describeSlack, formatDate } from "@/lib/api";
 import { ClaimTag } from "./ClaimTag";
+import { EligibilityPane } from "./EligibilityPane";
+import { ExportBar } from "./ExportBar";
 import styles from "./PlanPane.module.css";
 
 /*
@@ -38,7 +41,7 @@ const PRIORITY_LABEL: Record<Priority, string> = {
 };
 
 export interface Selection {
-  kind: "action" | "gap" | "deadline" | "title" | "type";
+  kind: "action" | "gap" | "deadline" | "title" | "type" | "condition";
   id: string;
 }
 
@@ -46,20 +49,41 @@ export function PlanPane({
   analysis,
   selection,
   onSelect,
-  completed,
   onToggleComplete,
+  onProfile,
+  onClearProfile,
+  busy,
 }: {
   analysis: Analysis;
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
-  completed: ReadonlySet<string>;
   onToggleComplete: (id: string) => void;
+  onProfile: (profile: Profile) => void;
+  onClearProfile: () => void;
+  busy: boolean;
 }) {
-  const remaining = analysis.actions.filter((a) => !completed.has(a.id)).length;
+  // Completion is server state, not local state: a finished prerequisite
+  // changes what is blocked and whether the plan still fits, so the plan on
+  // screen is always the one the engine recomputed.
+  const completed = new Set(analysis.completed);
+  const remaining = analysis.actions.length - completed.size;
 
   return (
-    <div className={styles.pane}>
+    <div className={styles.pane} aria-busy={busy}>
       <Summary analysis={analysis} selection={selection} onSelect={onSelect} />
+
+      <EligibilityPane
+        analysis={analysis}
+        busy={busy}
+        onSubmit={onProfile}
+        onClear={onClearProfile}
+        onSelectCondition={(requirement) =>
+          onSelect({ kind: "condition", id: requirement })
+        }
+        selectedRequirement={
+          selection?.kind === "condition" ? selection.id : null
+        }
+      />
 
       <section className={styles.section} aria-labelledby="plan-heading">
         <div className={styles.sectionHead}>
@@ -104,6 +128,8 @@ export function PlanPane({
       {analysis.gaps.length > 0 && (
         <GapSection gaps={analysis.gaps} selection={selection} onSelect={onSelect} />
       )}
+
+      <ExportBar analysis={analysis} />
     </div>
   );
 }

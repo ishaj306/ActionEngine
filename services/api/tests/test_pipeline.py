@@ -187,6 +187,18 @@ class TestRequirements:
 
         assert len(texts) == len(set(texts))
 
+    def test_a_step_lists_the_same_requirements_as_the_summary(self, analysis):
+        """Two cue patterns match one phrase, yielding both wordings.
+
+        Collapsing them in the document-wide list but not on the step made the
+        step say three things where the summary said two, and a reader who
+        notices that stops trusting either.
+        """
+        summary = {item.text for item in analysis.requirements}
+
+        for item in analysis.plan.scheduled:
+            assert set(item.action.requires) <= summary
+
 
 class TestOcrConfidence:
     """Certainty about a sentence cannot exceed certainty about its characters."""

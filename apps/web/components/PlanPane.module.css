@@ -1,10 +1,10 @@
+/* The scroll lives on the column wrapper in page.module.css, not here: this
+   pane is now one of several stacked blocks in that column, and a scroller
+   inside a scroller makes both hard to use. */
 .pane {
   display: flex;
   flex-direction: column;
-  min-height: 0;
   min-width: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   background: var(--paper);
 }
 

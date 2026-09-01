@@ -33,6 +33,16 @@ from app.modules.extraction.temporal import (
     extract_temporal,
 )
 from app.modules.ingestion.document import ParsedDocument, SourceKind
+from app.modules.reasoning.relevance import (
+    Assessment,
+    Criterion,
+    Finding,
+    Match,
+    Profile,
+    Relevance,
+    assess,
+    extract_criteria,
+)
 
 #: Confidence at or above which a temporal expression is stated outright.
 _FACT_THRESHOLD = 0.85
@@ -65,6 +75,24 @@ _TITLE_LINE = re.compile(r"^[^\n]{6,120}$", re.MULTILINE)
 
 
 @dataclass(frozen=True, slots=True)
+class Condition:
+    """An eligibility criterion, anchored to the sentence that states it.
+
+    The reasoning module works in offsets and knows nothing about pages or
+    documents, the same way every other extraction module here does. Anchoring
+    happens once, at this seam, so there is one place where a finding acquires
+    its provenance.
+    """
+
+    criterion: Criterion
+    evidence: EvidenceSpan
+    #: The check against the reader's profile. None when none was supplied --
+    #: the condition is still worth showing, because it tells the reader what
+    #: they would have to know to answer it.
+    finding: Finding | None
+
+
+@dataclass(frozen=True, slots=True)
 class Analysis:
     """Everything the engine concluded about one document."""
 
@@ -75,6 +103,12 @@ class Analysis:
     plan: Plan
     gaps: tuple[InformationGap, ...]
     requirements: tuple[Requirement, ...]
+    #: Eligibility conditions the document states, whether or not a profile was
+    #: supplied to check them against.
+    conditions: tuple[Condition, ...]
+    #: Present only when the caller supplied a profile.
+    assessment: Assessment | None
+    relevance: Claim[str] | None
     source_kind: SourceKind
     page_count: int
     needs_ocr: bool
@@ -109,6 +143,7 @@ def analyse(
     today: date,
     document_id: str | None = None,
     completed: frozenset[str] = frozenset(),
+    profile: Profile | None = None,
 ) -> Analysis:
     """Run the full pipeline over an already-parsed document."""
     started = perf_counter()
@@ -130,6 +165,20 @@ def analyse(
         tuple(phrase for action in actions for phrase in action.requires)
     )
 
+    criteria = extract_criteria(text)
+    assessment = assess(criteria, profile) if profile is not None else None
+    # `assess` returns exactly one finding per criterion, in order, so the two
+    # sequences pair positionally.
+    findings = assessment.findings if assessment else (None,) * len(criteria)
+    conditions = tuple(
+        Condition(
+            criterion=criterion,
+            evidence=_span(criterion.char_start, criterion.char_end, document),
+            finding=finding,
+        )
+        for criterion, finding in zip(criteria, findings, strict=True)
+    )
+
     return Analysis(
         document_id=document_id or _fingerprint(text),
         title=_title(document),
@@ -138,6 +187,9 @@ def analyse(
         plan=plan,
         gaps=gaps,
         requirements=requirements,
+        conditions=conditions,
+        assessment=assessment,
+        relevance=_relevance_claim(assessment, document),
         source_kind=document.source_kind,
         page_count=document.page_count,
         needs_ocr=document.needs_ocr,
@@ -172,6 +224,63 @@ def _document_type(document: ParsedDocument) -> Claim[str]:
     )
 
 
+#: What each verdict says to the reader, in the reader's terms.
+_RELEVANCE_LABEL: dict[Relevance, str] = {
+    Relevance.APPLIES: "This applies to you",
+    Relevance.DOES_NOT_APPLY: "This does not appear to apply to you",
+    Relevance.UNDETERMINED: "Not enough about you to tell",
+    Relevance.NOT_RESTRICTED: "The document never says who it is for",
+}
+
+
+def _relevance_claim(
+    assessment: Assessment | None,
+    document: ParsedDocument,
+) -> Claim[str] | None:
+    """Express an eligibility verdict as a claim like any other.
+
+    Two things are load-bearing here. A document that states no conditions
+    produces a `MISSING` claim -- the absence of a stated audience is a real
+    finding about the document, not a failure to extract one, and it is the
+    single most common reason a reader wastes a week on a notice meant for
+    somebody else.
+
+    And relevance is never a `FACT`. No document says "you are ineligible"; it
+    states a condition, and the engine compares. That comparison is an
+    inference however arithmetic it looks, so the classification is capped.
+    """
+    if assessment is None:
+        return None
+
+    confidence = _capped(assessment.confidence, document)
+    label = _RELEVANCE_LABEL[assessment.verdict]
+    rationale = assessment.rationale + _ocr_note(document)
+
+    if assessment.verdict is Relevance.NOT_RESTRICTED:
+        return Claim[str](
+            value=label,
+            classification=ClaimClass.MISSING,
+            confidence=Confidence(score=confidence, rationale=rationale),
+        )
+
+    decisive = assessment.conflicts or tuple(
+        item for item in assessment.findings if item.match is Match.MATCHES
+    )
+    anchor = (decisive or assessment.findings)[0].criterion
+    span = _span(anchor.char_start, anchor.char_end, document)
+
+    classification = _classify_confidence(confidence)
+    if classification is ClaimClass.FACT:
+        classification = ClaimClass.INFERENCE
+
+    return Claim[str](
+        value=label,
+        classification=classification,
+        confidence=Confidence(score=confidence, rationale=rationale),
+        evidence=span,
+    )
+
+
 def _build_actions(
     candidates: list[rules.ActionCandidate],
     temporal: list[TemporalExpression],
@@ -197,7 +306,14 @@ def _build_actions(
                 ),
                 deadline=_deadline_for(candidate, temporal),
                 effort_days=_DEFAULT_EFFORT[candidate.verb],
-                requires=candidate.requires,
+                # Collapsed here as well as in the document-wide list, or the
+                # step reads "Income certificate · Self-attested copy of
+                # previous marksheet · Previous marksheet" while the summary
+                # below it correctly says two things. The reader trusts
+                # neither once they disagree.
+                requires=tuple(
+                    item.text for item in requirement_rules.group(candidate.requires)
+                ),
             )
         )
     return _link_dependencies(actions)
@@ -211,9 +327,12 @@ def _link_dependencies(actions: list[Action]) -> list[Action]:
     certificate" needs whichever action obtains that certificate. Failing that,
     actions fall back to the coarse stage order of their verbs.
 
-    Only the immediately preceding stage is linked rather than every earlier
-    one, so the graph stays a chain instead of becoming dense with redundant
-    edges that make the plan unreadable.
+    Only the nearest occupied earlier stage is linked, not every earlier one,
+    so the graph stays a chain instead of becoming dense with redundant edges
+    that make the plan unreadable. Nearest *occupied* matters: obtaining a
+    certificate has to block submitting the form even when the document names
+    no preparation step in between, and keying off the literal previous stage
+    number left exactly that pairing unlinked.
     """
     producers: dict[str, str] = {}
     for action in actions:
@@ -238,13 +357,9 @@ def _link_dependencies(actions: list[Action]) -> list[Action]:
 
         if not dependencies:
             stage = _VERB_STAGE[action.verb]
-            previous = [
-                other
-                for other_stage, ids in by_stage.items()
-                if other_stage == stage - 1
-                for other in ids
-            ]
-            dependencies.update(previous)
+            earlier = [other for other in by_stage if other < stage]
+            if earlier:
+                dependencies.update(by_stage[max(earlier)])
 
         linked.append(
             Action(

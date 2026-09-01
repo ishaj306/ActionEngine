@@ -70,6 +70,47 @@ export interface Requirement {
   kind: RequirementKind;
 }
 
+export const ATTRIBUTES = [
+  "year",
+  "programme",
+  "category",
+  "domicile",
+  "score",
+  "cgpa",
+  "age",
+] as const;
+export type Attribute = (typeof ATTRIBUTES)[number];
+
+export type MatchResult = "matches" | "conflicts" | "unknown";
+
+export type RelevanceVerdict =
+  | "applies"
+  | "does_not_apply"
+  | "undetermined"
+  | "not_restricted";
+
+/** One eligibility condition the document states, checked where possible. */
+export interface Condition {
+  attribute: Attribute;
+  requirement: string;
+  /** Null until a profile is supplied. */
+  match: MatchResult | null;
+  profile_value: string | null;
+  explanation: string;
+  evidence: Evidence;
+}
+
+/** Self-declared, all optional. Nothing here is inferred from a document. */
+export interface Profile {
+  year?: number | null;
+  programme?: string | null;
+  category?: string | null;
+  domicile?: string | null;
+  score?: number | null;
+  cgpa?: number | null;
+  age?: number | null;
+}
+
 export interface Analysis {
   document_id: string;
   filename: string;
@@ -80,6 +121,11 @@ export interface Analysis {
   actions: Action[];
   gaps: Gap[];
   requirements: Requirement[];
+  conditions: Condition[];
+  /** Null until a profile is supplied; MISSING when the document never says. */
+  relevance: Claim | null;
+  relevance_verdict: RelevanceVerdict | null;
+  completed: string[];
   is_feasible: boolean;
   unresolved_count: number;
   page_count: number;
@@ -91,6 +137,57 @@ export interface Analysis {
   broken_cycles: string[][];
   duration_ms: number;
   text: string;
+}
+
+export type Severity = "critical" | "notable" | "minor";
+
+export interface Change {
+  kind: string;
+  severity: Severity;
+  summary: string;
+  before: string | null;
+  after: string | null;
+}
+
+export interface Comparison {
+  previous_document_id: string;
+  current_document_id: string;
+  changes: Change[];
+  headline: string;
+  /** Shared vocabulary, 0–1. Low means these may not be the same document. */
+  relatedness: number;
+  warning: string | null;
+}
+
+export interface Conflict {
+  kind: "deadline" | "eligibility";
+  summary: string;
+  /** [document id, document name, the value that document states] */
+  positions: string[][];
+  relatedness: number;
+  resolution: string;
+}
+
+export interface TimelineItem {
+  document_id: string;
+  document_name: string;
+  action: Action;
+}
+
+export interface Portfolio {
+  timeline: TimelineItem[];
+  undated: TimelineItem[];
+  conflicts: Conflict[];
+  is_consistent: boolean;
+  /** Often earlier than anything stated: prerequisites inherit deadlines. */
+  next_due: string | null;
+  next_stated_deadline: string | null;
+}
+
+export interface EnquiryDraft {
+  subject: string;
+  body: string;
+  question_count: number;
 }
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -158,6 +255,78 @@ export async function analyseText(
   } catch (cause) {
     asNetworkError(cause);
   }
+}
+
+async function unwrapAs<T>(response: Response): Promise<T> {
+  if (response.ok) return (await response.json()) as T;
+
+  let detail = `Request failed (${response.status}).`;
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") detail = body.detail;
+  } catch {
+    // A non-JSON error body is still an error.
+  }
+  throw new ApiError(detail);
+}
+
+/**
+ * Replace the reader's working state and get the re-derived plan.
+ *
+ * Completion is not a display concern: a finished prerequisite stops blocking
+ * what depends on it and stops counting against feasibility, so the server
+ * returns a recomputed plan rather than the client striking a line through.
+ */
+export async function updatePlan(
+  documentId: string,
+  patch: { completed?: string[]; profile?: Profile; clear_profile?: boolean },
+  signal?: AbortSignal,
+): Promise<Analysis> {
+  try {
+    return await unwrap(
+      await fetch(`${BASE}/v1/documents/${documentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+        signal,
+      }),
+    );
+  } catch (cause) {
+    asNetworkError(cause);
+  }
+}
+
+export async function fetchAnalysis(documentId: string): Promise<Analysis> {
+  return unwrap(await fetch(`${BASE}/v1/documents/${documentId}`));
+}
+
+export async function fetchChanges(
+  documentId: string,
+  since: string,
+): Promise<Comparison> {
+  return unwrapAs<Comparison>(
+    await fetch(`${BASE}/v1/documents/${documentId}/changes?since=${since}`),
+  );
+}
+
+export async function fetchPortfolio(documentIds: string[]): Promise<Portfolio> {
+  return unwrapAs<Portfolio>(
+    await fetch(`${BASE}/v1/portfolio`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_ids: documentIds }),
+    }),
+  );
+}
+
+export async function fetchEnquiry(documentId: string): Promise<EnquiryDraft> {
+  return unwrapAs<EnquiryDraft>(
+    await fetch(`${BASE}/v1/documents/${documentId}/enquiry`),
+  );
+}
+
+export function calendarUrl(documentId: string): string {
+  return `${BASE}/v1/documents/${documentId}/calendar.ics`;
 }
 
 /** Format an ISO date for display in the viewer's locale. */

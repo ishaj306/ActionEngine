@@ -1,14 +1,22 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   analyseFile,
   analyseText,
+  fetchAnalysis,
+  fetchChanges,
+  fetchPortfolio,
+  updatePlan,
   type Analysis,
+  type Comparison,
   type Evidence,
+  type Portfolio,
+  type Profile,
 } from "@/lib/api";
 import { SAMPLES } from "@/lib/samples";
+import { ChangesBanner, PortfolioPanel } from "@/components/CrossDocument";
 import { PlanPane, type Selection } from "@/components/PlanPane";
 import { SourcePane } from "@/components/SourcePane";
 import styles from "./page.module.css";
@@ -20,46 +28,186 @@ interface Failure {
   remedy: string | undefined;
 }
 
+/** Documents read in this session, so they can be compared with each other. */
+interface Seen {
+  id: string;
+  name: string;
+}
+
+const LAST_DOCUMENT = "document-action:last";
+
+/** The fields the workspace dereferences without checking first. */
+function isRenderable(value: Analysis | null): value is Analysis {
+  return Boolean(
+    value &&
+      typeof value.document_id === "string" &&
+      typeof value.text === "string" &&
+      value.document_type?.rationale !== undefined &&
+      Array.isArray(value.actions) &&
+      Array.isArray(value.conditions) &&
+      Array.isArray(value.completed),
+  );
+}
+
 export default function Page() {
   const [status, setStatus] = useState<Status>("idle");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
-  const [completed, setCompleted] = useState<ReadonlySet<string>>(new Set());
+  const [history, setHistory] = useState<Seen[]>([]);
+  const [comparison, setComparison] = useState<
+    { result: Comparison; previousName: string } | null
+  >(null);
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
+  const [patching, setPatching] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
 
-  const run = useCallback(async (work: (signal: AbortSignal) => Promise<Analysis>) => {
-    inFlight.current?.abort();
-    const controller = new AbortController();
-    inFlight.current = controller;
-
-    setStatus("working");
-    setFailure(null);
+  const remember = useCallback((result: Analysis) => {
+    setAnalysis(result);
+    setHistory((current) => {
+      const without = current.filter((item) => item.id !== result.document_id);
+      return [...without, { id: result.document_id, name: result.filename }];
+    });
     try {
-      const result = await work(controller.signal);
-      if (controller.signal.aborted) return;
-      setAnalysis(result);
-      setSelection(null);
-      setCompleted(new Set());
-      setStatus("ready");
-    } catch (cause) {
-      if (controller.signal.aborted) return;
-      const error =
-        cause instanceof ApiError
-          ? cause
-          : new ApiError("Something went wrong while analysing the document.");
-      setFailure({ message: error.message, remedy: error.remedy });
-      setStatus("error");
+      window.localStorage.setItem(LAST_DOCUMENT, result.document_id);
+    } catch {
+      // Private browsing refuses storage. Losing the handle across a reload is
+      // a small loss; failing to render the analysis would not be.
     }
   }, []);
 
-  const toggleComplete = useCallback((id: string) => {
-    setCompleted((current) => {
-      const next = new Set(current);
+  // Bring back the last document read on this machine, so a reload does not
+  // throw away a plan with ticks on it.
+  useEffect(() => {
+    let cancelled = false;
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem(LAST_DOCUMENT);
+    } catch {
+      return;
+    }
+    if (!stored) return;
+
+    fetchAnalysis(stored)
+      .then((result) => {
+        if (cancelled) return;
+        // Everything else in the app receives an analysis it just requested.
+        // This one arrives from a previous run against a server that may since
+        // have been rebuilt, so it is the one payload worth checking before
+        // rendering — an older shape here took the whole page down.
+        if (!isRenderable(result)) return;
+        remember(result);
+        setStatus("ready");
+      })
+      .catch(() => {
+        // The server restarted, or the document was evicted from its cache.
+        // Either way there is nothing to restore and nothing to report.
+        try {
+          window.localStorage.removeItem(LAST_DOCUMENT);
+        } catch {
+          /* nothing further to do */
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [remember]);
+
+  const run = useCallback(
+    async (work: (signal: AbortSignal) => Promise<Analysis>) => {
+      inFlight.current?.abort();
+      const controller = new AbortController();
+      inFlight.current = controller;
+
+      setStatus("working");
+      setFailure(null);
+      try {
+        const result = await work(controller.signal);
+        if (controller.signal.aborted) return;
+        remember(result);
+        setSelection(null);
+        setComparison(null);
+        setPortfolio(null);
+        setStatus("ready");
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        const error =
+          cause instanceof ApiError
+            ? cause
+            : new ApiError("Something went wrong while analysing the document.");
+        setFailure({ message: error.message, remedy: error.remedy });
+        setStatus("error");
+      }
+    },
+    [remember],
+  );
+
+  /**
+   * Every change to the reader's own state goes back to the server and comes
+   * back as a recomputed plan. Ticking a step off is not a strikethrough: it
+   * unblocks what was waiting on it and takes it out of the feasibility sum.
+   */
+  const patch = useCallback(
+    async (body: Parameters<typeof updatePlan>[1]) => {
+      if (!analysis) return;
+      setPatching(true);
+      try {
+        setAnalysis(await updatePlan(analysis.document_id, body));
+      } catch (cause) {
+        const error = cause instanceof ApiError ? cause : null;
+        setFailure({
+          message: error?.message ?? "The plan could not be updated.",
+          remedy: error?.remedy,
+        });
+      } finally {
+        setPatching(false);
+      }
+    },
+    [analysis],
+  );
+
+  const toggleComplete = useCallback(
+    (id: string) => {
+      if (!analysis) return;
+      const next = new Set(analysis.completed);
       if (!next.delete(id)) next.add(id);
-      return next;
-    });
-  }, []);
+      void patch({ completed: [...next] });
+    },
+    [analysis, patch],
+  );
+
+  const compareWith = useCallback(
+    async (previousId: string) => {
+      if (!analysis) return;
+      const previous = history.find((item) => item.id === previousId);
+      try {
+        const result = await fetchChanges(analysis.document_id, previousId);
+        setComparison({ result, previousName: previous?.name ?? "the earlier version" });
+        setPortfolio(null);
+      } catch (cause) {
+        const error = cause instanceof ApiError ? cause : null;
+        setFailure({
+          message: error?.message ?? "The comparison failed.",
+          remedy: undefined,
+        });
+      }
+    },
+    [analysis, history],
+  );
+
+  const readTogether = useCallback(async () => {
+    try {
+      setPortfolio(await fetchPortfolio(history.map((item) => item.id)));
+      setComparison(null);
+    } catch (cause) {
+      const error = cause instanceof ApiError ? cause : null;
+      setFailure({
+        message: error?.message ?? "The documents could not be read together.",
+        remedy: undefined,
+      });
+    }
+  }, [history]);
 
   const activeEvidence = useMemo<Evidence | null>(() => {
     if (!analysis || !selection) return null;
@@ -72,6 +220,11 @@ export default function Page() {
         const index = Number.parseInt(selection.id.replace("gap-", ""), 10);
         return analysis.gaps[index]?.evidence ?? null;
       }
+      case "condition":
+        return (
+          analysis.conditions.find((c) => c.requirement === selection.id)?.evidence ??
+          null
+        );
       case "deadline":
         return analysis.primary_deadline?.evidence ?? null;
       case "title":
@@ -92,10 +245,13 @@ export default function Page() {
       const index = Number.parseInt(selection.id.replace("gap-", ""), 10);
       return analysis.gaps[index]?.question ?? null;
     }
+    if (selection.kind === "condition") return selection.id;
     if (selection.kind === "deadline") return "the deadline";
     if (selection.kind === "type") return "the document type";
     return "the title";
   }, [analysis, selection]);
+
+  const others = history.filter((item) => item.id !== analysis?.document_id);
 
   return (
     <div className={styles.shell}>
@@ -106,21 +262,57 @@ export default function Page() {
           inFlight.current?.abort();
           setAnalysis(null);
           setSelection(null);
+          setComparison(null);
+          setPortfolio(null);
           setStatus("idle");
           setFailure(null);
+          try {
+            window.localStorage.removeItem(LAST_DOCUMENT);
+          } catch {
+            /* nothing further to do */
+          }
         }}
       />
 
       <main id="main" className={styles.main}>
         {status === "ready" && analysis ? (
           <div className={styles.workspace}>
-            <PlanPane
-              analysis={analysis}
-              selection={selection}
-              onSelect={setSelection}
-              completed={completed}
-              onToggleComplete={toggleComplete}
-            />
+            <div className={styles.left}>
+              {others.length > 0 && (
+                <SessionBar
+                  others={others}
+                  onCompare={compareWith}
+                  onReadTogether={readTogether}
+                  canReadTogether={history.length >= 2}
+                />
+              )}
+
+              {comparison && (
+                <ChangesBanner
+                  comparison={comparison.result}
+                  previousName={comparison.previousName}
+                  onDismiss={() => setComparison(null)}
+                />
+              )}
+
+              {portfolio && (
+                <PortfolioPanel
+                  portfolio={portfolio}
+                  onClose={() => setPortfolio(null)}
+                />
+              )}
+
+              <PlanPane
+                analysis={analysis}
+                selection={selection}
+                onSelect={setSelection}
+                onToggleComplete={toggleComplete}
+                onProfile={(profile: Profile) => void patch({ profile })}
+                onClearProfile={() => void patch({ clear_profile: true })}
+                busy={patching}
+              />
+            </div>
+
             <SourcePane
               text={analysis.text}
               active={activeEvidence}
@@ -136,6 +328,67 @@ export default function Page() {
           />
         )}
       </main>
+    </div>
+  );
+}
+
+/**
+ * Reading a second document is what makes the third and fourth behaviours
+ * possible, so the affordance appears the moment there is a second one — and
+ * not a moment before, when it would be a dead control.
+ */
+function SessionBar({
+  others,
+  onCompare,
+  onReadTogether,
+  canReadTogether,
+}: {
+  others: Seen[];
+  onCompare: (id: string) => void;
+  onReadTogether: () => void;
+  canReadTogether: boolean;
+}) {
+  const [choice, setChoice] = useState(others[others.length - 1]?.id ?? "");
+
+  return (
+    <div className={styles.sessionBar}>
+      <span className={styles.sessionLabel}>
+        {others.length + 1} documents this session
+      </span>
+
+      <div className={styles.sessionControls}>
+        <label htmlFor="compare-with" className="visually-hidden">
+          Earlier version to compare against
+        </label>
+        <select
+          id="compare-with"
+          className={styles.sessionSelect}
+          value={choice}
+          onChange={(event) => setChoice(event.target.value)}
+        >
+          {others.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className={styles.sessionButton}
+          onClick={() => onCompare(choice)}
+          disabled={!choice}
+        >
+          What changed
+        </button>
+        <button
+          type="button"
+          className={styles.sessionButton}
+          onClick={onReadTogether}
+          disabled={!canReadTogether}
+        >
+          Read them together
+        </button>
+      </div>
     </div>
   );
 }

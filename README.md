@@ -24,7 +24,7 @@ The document does not say
 
 ## Why this is not another PDF summarizer
 
-Three behaviours, none of which the extraction layer alone gives you.
+Five behaviours, none of which the extraction layer alone gives you.
 
 **Every claim carries its epistemic status.** Nothing reaches the interface as
 bare text. A value is `FACT`, `INFERENCE`, `UNCERTAIN` or `MISSING`, with a
@@ -57,6 +57,67 @@ certainty about its characters. When a page is read by OCR at 61% mean
 confidence, every claim drawn from it is capped there — a deadline that would
 be a 97% `FACT` in a native PDF comes back as an `INFERENCE`, and says why.
 
+**It reads a reissue as a diff of findings, not of text.** A revised notice is
+retyped, reflowed and renumbered, so a line-by-line diff is almost all noise
+and the four-day deadline move is one changed line among two hundred. Comparing
+the *findings* — the deadline, the steps, the requirements, the eligibility
+conditions — produces three lines of signal:
+
+```
+The deadline moved forward by 4 days, from 18 Sep to 14 Sep.
+   2026-09-18 → 2026-09-14
+New eligibility condition: at least 70% aggregate. Check that you still qualify.
+You now also need: Caste certificate.
+```
+
+---
+
+## Does it apply to you?
+
+A notice restricts itself in one sentence and never mentions it again. The
+reader who fails that restriction builds the whole plan and finds out at the
+counter.
+
+The form asks only for the attributes *this* document restricts — derived from
+the conditions found in its text, because a seven-field profile in front of a
+notice that mentions one condition is a tax on the reader. Two rules keep the
+answer honest:
+
+**A conflict is only asserted where the comparison is arithmetic.** Year, marks
+and age are numbers, and a number either clears a bar or does not. Programme
+and place are open vocabularies: a profile saying `CSE` against a document
+saying `Computer Science` shares no token, and reporting that as *you are not
+eligible* would be a confident, wrong and consequential answer. Those come back
+open, with both strings shown.
+
+**A criterion that cannot be turned into a comparison says so.** "Final year"
+is a real restriction whose number depends on the length of the programme. It
+is extracted, displayed, and marked as something the engine declines to decide.
+
+The verdict annotates the plan and never hides it. The extraction is lexical
+and can miss, and a plan withheld on a false negative is a worse failure than a
+plan shown under a warning. A document that states *no* condition produces a
+`MISSING` claim: not saying who it is for is a finding about the document.
+
+---
+
+## Taking it out of the app
+
+The calendar file puts each step on the day work has to **start**, not the day
+it is due — putting the deadline in the calendar instead is how people start a
+ten-day errand two days out. Each event carries its source sentence and its
+confidence, and an entry below the actionable threshold is written `TENTATIVE`
+rather than `CONFIRMED`. Steps with no governing date get no event, because
+guessing a date into somebody's calendar is worse than leaving it to them.
+
+Every gap the engine reports is, from the reader's side, an email they have to
+write — so it writes it, quoting the phrase that raised each question so the
+person answering can find the sentence and reply once.
+
+Both are a file and a draft rather than live integrations. OAuth scopes, a
+token store and a consent screen would buy what a download already does, and
+would write into somebody's real calendar on the strength of an extraction.
+
 ---
 
 ## What is deterministic and what is not
@@ -74,7 +135,10 @@ are invisible in the output and wrong about half the time.
 | Dependency graph, scheduling | Deterministic | Topological order and slack are arithmetic |
 | Evidence anchoring | Fuzzy match, scored | Models quote approximately; the score travels with the span |
 | Action & requirement extraction | Rules today, hybrid next | The rule arm is the evaluation baseline, not a stub |
-| Relevance, ambiguity | Model (next phase) | No rule-based answer exists |
+| Eligibility matching | Deterministic | Comparing a self-declared number to a stated bar is arithmetic |
+| Eligibility *extraction* from prose | Rules today, model next | Restrictions are phrased a hundred ways; the rules cover the common ones |
+| Revision and cross-document diff | Deterministic | Set comparison over findings that already carry their own confidence |
+| Ambiguity, cross-sentence attachment | Model (next phase) | No rule-based answer exists |
 
 `03/04/2026` comes back flagged with **both** readings and a confidence of 0.45,
 not silently disambiguated.
@@ -135,8 +199,20 @@ chosen to flatter the engine — the first hides a prerequisite that no longer
 fits its deadline, the second is vague in three places.
 
 ```bash
-cd services/api && python -m pytest -q     # 222 tests
+cd services/api && python -m pytest -q     # 317 tests
 ```
+
+### API
+
+| | |
+| --- | --- |
+| `POST /v1/documents` | Upload a PDF, image or text file |
+| `POST /v1/documents/text` | Analyse pasted text |
+| `PATCH /v1/documents/{id}` | Set completed steps or a profile; returns the re-derived plan |
+| `GET /v1/documents/{id}/changes?since=` | Diff two readings of the same document |
+| `POST /v1/portfolio` | Read several documents together; reports contradictions |
+| `GET /v1/documents/{id}/calendar.ics` | The dated steps, on their start dates |
+| `GET /v1/documents/{id}/enquiry` | A draft email asking what the document omits |
 
 ---
 
@@ -150,8 +226,9 @@ services/api/app/
     evidence/       offset-preserving normalization, fuzzy span anchoring
     extraction/     temporal, classification, requirements, rules (baseline)
     action_engine/  dependency graph, backward scheduling, priority
+    reasoning/      eligibility, revision diff, cross-document contradiction
   pipeline.py       composes the stages into one Analysis
-  api/              wire format; enforces the serialization invariant
+  api/              wire format, .ics and email export; the serialization invariant
 
 apps/web/
   components/       ClaimTag, PlanPane, SourcePane
@@ -170,20 +247,28 @@ certainty, so meaning survives greyscale, colour blindness and a screen reader.
 
 ## Status
 
-**MVP scope is complete.** PDF, image and text ingestion with OCR; document
-classification; deadline, requirement, action and gap extraction; the four-state
-epistemic model; per-claim evidence anchoring; dependency-aware scheduling; the
-HTTP API; and the workspace interface. 222 tests.
+**Every planned feature is built.** PDF, image and text ingestion with OCR;
+document classification; deadline, requirement, action and gap extraction; the
+four-state epistemic model; per-claim evidence anchoring; dependency-aware
+backward scheduling and priority; eligibility matching against a self-declared
+profile; calendar and email export; server-side completion tracking; revision
+comparison; and cross-document contradiction detection. 317 tests.
+
+Three limitations worth naming, all deliberate:
+
+- **A deadline attaches to an action only when it appears in that action's own
+  sentence.** Linking a date across sentences is exactly the confident guess
+  this engine avoids by rule, and is the model stage's job.
+- **Eligibility conflicts are never asserted on free text.** A programme or a
+  place that does not match comes back open rather than disqualifying.
+- **No dependency is inferred across documents.** Whether the circular's step
+  blocks the notice's step is a question about the world, not the text, so the
+  merged timeline orders by date and attributes every step to its source.
 
 Next, in order: the model extraction arm behind the same `Claim` contract, with
 a verification pass that demotes any claim its cited span does not entail; the
-annotated benchmark and the rules-vs-model-vs-hybrid ablation; Postgres behind
-the existing `Store` boundary; then document change detection.
-
-One limitation worth naming: a deadline is attached to an action only when it
-appears in that action's own sentence. Linking a date across sentences is
-exactly the confident guess this engine avoids making by rule, and is the
-model stage's job.
+annotated benchmark and the rules-vs-model-vs-hybrid ablation; then Postgres
+behind the existing `Store` boundary.
 
 Design rationale, competitive analysis and the full roadmap are in
 [`strategy.html`](strategy.html).

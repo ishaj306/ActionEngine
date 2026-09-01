@@ -151,24 +151,232 @@ class TestRetrieval:
         assert client.delete("/v1/documents/nope").status_code == 404
 
 
+class TestWorkingState:
+    """Completion and profile are the reader's state, not the document's."""
+
+    def test_ticking_a_step_off_recomputes_the_plan(self, client, analysed):
+        obtain = next(a for a in analysed["actions"] if a["verb"] == "obtain")
+        blocked = [a for a in analysed["actions"] if obtain["id"] in a["blocked_by"]]
+        assert blocked, "the sample has a dependency worth unblocking"
+
+        updated = client.patch(
+            f"/v1/documents/{analysed['document_id']}",
+            json={"completed": [obtain["id"]]},
+        ).json()
+
+        after = next(a for a in updated["actions"] if a["id"] == blocked[0]["id"])
+        assert obtain["id"] not in after["blocked_by"]
+        assert updated["completed"] == [obtain["id"]]
+
+    def test_completion_survives_a_later_read(self, client, analysed):
+        document_id = analysed["document_id"]
+        first = analysed["actions"][0]["id"]
+        client.patch(f"/v1/documents/{document_id}", json={"completed": [first]})
+
+        assert client.get(f"/v1/documents/{document_id}").json()["completed"] == [first]
+
+    def test_a_completed_step_stops_counting_against_feasibility(self, client):
+        """A step finished last week is not a scheduling problem."""
+        text = (
+            "Candidates must obtain the income certificate from the Tehsildar.\n"
+            "Students must submit the application before 2 September 2026."
+        )
+        created = client.post("/v1/documents/text", json={"text": text}).json()
+        assert not created["is_feasible"]
+
+        late = [a for a in created["actions"] if (a["slack_days"] or 0) < 0]
+        updated = client.patch(
+            f"/v1/documents/{created['document_id']}",
+            json={"completed": [a["id"] for a in late]},
+        ).json()
+
+        assert updated["is_feasible"]
+
+    def test_an_unknown_action_id_is_rejected(self, client, analysed):
+        response = client.patch(
+            f"/v1/documents/{analysed['document_id']}",
+            json={"completed": ["action-999"]},
+        )
+
+        assert response.status_code == 422
+        assert "action-999" in response.json()["detail"]
+
+    def test_a_profile_produces_a_relevance_verdict(self, client, analysed):
+        updated = client.patch(
+            f"/v1/documents/{analysed['document_id']}",
+            json={"profile": {"year": 1}},
+        ).json()
+
+        assert updated["relevance_verdict"] == "does_not_apply"
+        assert updated["relevance"]["classification"] == "INFERENCE"
+        assert updated["relevance"]["evidence"] is not None
+
+    def test_relevance_is_absent_until_a_profile_is_given(self, analysed):
+        assert analysed["relevance"] is None
+        assert analysed["relevance_verdict"] is None
+
+    def test_conditions_are_listed_even_without_a_profile(self, analysed):
+        assert any(item["attribute"] == "year" for item in analysed["conditions"])
+        assert all(item["match"] is None for item in analysed["conditions"])
+
+    def test_a_profile_can_be_forgotten(self, client, analysed):
+        document_id = analysed["document_id"]
+        client.patch(f"/v1/documents/{document_id}", json={"profile": {"year": 3}})
+
+        cleared = client.patch(
+            f"/v1/documents/{document_id}", json={"clear_profile": True}
+        ).json()
+
+        assert cleared["relevance"] is None
+
+    def test_an_out_of_range_profile_value_is_rejected(self, client, analysed):
+        response = client.patch(
+            f"/v1/documents/{analysed['document_id']}",
+            json={"profile": {"score": 140}},
+        )
+
+        assert response.status_code == 422
+
+    def test_patching_an_unknown_document_returns_404(self, client):
+        assert client.patch("/v1/documents/nope", json={}).status_code == 404
+
+    def test_the_browser_is_allowed_to_send_a_patch(self, client, analysed):
+        """A method missing from the CORS allow-list fails at preflight.
+
+        The request never reaches the handler, so every server-side test still
+        passes while the feature is dead in a browser.
+        """
+        response = client.options(
+            f"/v1/documents/{analysed['document_id']}",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "PATCH",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "PATCH" in response.headers["access-control-allow-methods"]
+
+
+class TestExportEndpoints:
+    def test_the_calendar_is_served_as_a_download(self, client, analysed):
+        response = client.get(f"/v1/documents/{analysed['document_id']}/calendar.ics")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/calendar")
+        assert "attachment" in response.headers["content-disposition"]
+        assert response.text.startswith("BEGIN:VCALENDAR")
+
+    def test_a_non_ascii_filename_still_downloads(self, client):
+        """Header values are latin-1; a Devanagari title must not raise."""
+        created = client.post(
+            "/v1/documents/text",
+            json={"text": NOTICE, "filename": "छात्रवृत्ति सूचना.pdf"},
+        ).json()
+
+        response = client.get(f"/v1/documents/{created['document_id']}/calendar.ics")
+
+        assert response.status_code == 200
+        assert response.headers["content-disposition"].isascii()
+
+    def test_the_enquiry_draft_asks_the_open_questions(self, client, analysed):
+        draft = client.get(f"/v1/documents/{analysed['document_id']}/enquiry").json()
+
+        assert draft["question_count"] == len(analysed["gaps"])
+        assert draft["subject"]
+
+    def test_exports_404_for_an_unknown_document(self, client):
+        assert client.get("/v1/documents/nope/calendar.ics").status_code == 404
+        assert client.get("/v1/documents/nope/enquiry").status_code == 404
+
+
+REVISED = NOTICE.replace("18 September 2026", "14 September 2026")
+
+CIRCULAR = """DEPARTMENTAL CIRCULAR — MERIT SCHOLARSHIP
+
+Third year students seeking the merit scholarship must submit the application
+form and income certificate to the department office before 22 September 2026.
+"""
+
+
+class TestCrossDocument:
+    def test_a_reissue_reports_what_moved(self, client, analysed):
+        revised = client.post("/v1/documents/text", json={"text": REVISED}).json()
+
+        result = client.get(
+            f"/v1/documents/{revised['document_id']}/changes",
+            params={"since": analysed["document_id"]},
+        ).json()
+
+        moved = next(c for c in result["changes"] if c["kind"] == "deadline_moved")
+        assert moved["severity"] == "critical"
+        assert result["headline"] == moved["summary"]
+        assert result["warning"] is None
+
+    def test_comparing_a_document_with_itself_is_rejected(self, client, analysed):
+        response = client.get(
+            f"/v1/documents/{analysed['document_id']}/changes",
+            params={"since": analysed["document_id"]},
+        )
+
+        assert response.status_code == 422
+
+    def test_comparing_against_an_unknown_document_returns_404(self, client, analysed):
+        response = client.get(
+            f"/v1/documents/{analysed['document_id']}/changes",
+            params={"since": "nope"},
+        )
+
+        assert response.status_code == 404
+
+    def test_two_documents_that_disagree_produce_a_conflict(self, client, analysed):
+        circular = client.post("/v1/documents/text", json={"text": CIRCULAR}).json()
+
+        result = client.post(
+            "/v1/portfolio",
+            json={"document_ids": [analysed["document_id"], circular["document_id"]]},
+        ).json()
+
+        assert not result["is_consistent"]
+        assert result["conflicts"][0]["kind"] == "deadline"
+        assert len(result["conflicts"][0]["positions"]) == 2
+
+    def test_the_merged_timeline_attributes_every_step(self, client, analysed):
+        circular = client.post("/v1/documents/text", json={"text": CIRCULAR}).json()
+        ids = {analysed["document_id"], circular["document_id"]}
+
+        result = client.post("/v1/portfolio", json={"document_ids": list(ids)}).json()
+
+        assert {item["document_id"] for item in result["timeline"]} == ids
+
+    def test_a_portfolio_needs_two_distinct_documents(self, client, analysed):
+        document_id = analysed["document_id"]
+        response = client.post(
+            "/v1/portfolio", json={"document_ids": [document_id, document_id]}
+        )
+
+        assert response.status_code == 422
+
+
 def test_store_evicts_the_oldest_beyond_capacity(client):
     """Memory stays bounded no matter how many documents are analysed."""
-    from app.api.schemas import AnalysisOut
-    from app.main import Store
+    from app.main import Store, store as live
 
-    small = Store(capacity=2)
-    analyses = [
-        AnalysisOut(
-            **client.post(
-                "/v1/documents/text",
-                json={"text": f"Submit form {index} before 1 October 2026."},
-            ).json()
-        )
+    ids = [
+        client.post(
+            "/v1/documents/text",
+            json={"text": f"Submit form {index} before 1 October 2026."},
+        ).json()["document_id"]
         for index in range(3)
     ]
-    for analysis in analyses:
-        small.put(analysis)
+
+    small = Store(capacity=2)
+    for document_id in ids:
+        record = live.get(document_id)
+        assert record is not None
+        small.put(record)
 
     assert len(small.recent()) == 2
-    assert small.get(analyses[0].document_id) is None
-    assert small.get(analyses[2].document_id) is not None
+    assert small.get(ids[0]) is None
+    assert small.get(ids[2]) is not None

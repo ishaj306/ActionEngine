@@ -1,0 +1,293 @@
+/*
+ * Eligibility.
+ *
+ * Every coloured state here carries a glyph and a word as well as a hue, for
+ * the same reason as everywhere else in this interface: colour is the
+ * redundant channel. "Not met" reads as not met in greyscale.
+ */
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.verdict {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+}
+
+.verdict[data-tone="yes"] {
+  color: var(--fact);
+  background: var(--fact-wash);
+  border-color: var(--fact-line);
+}
+
+.verdict[data-tone="no"] {
+  color: var(--missing);
+  background: var(--missing-wash);
+  border-color: var(--missing-line);
+}
+
+.verdict[data-tone="open"] {
+  color: var(--uncertain);
+  background: var(--uncertain-wash);
+  border-color: var(--uncertain-line);
+}
+
+.verdict[data-tone="absent"] {
+  color: var(--ink-secondary);
+  background: var(--surface-sunken);
+  border-color: var(--line-strong);
+}
+
+.rationale,
+.unstated {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-secondary);
+}
+
+.unstated {
+  padding: 11px 12px;
+  background: var(--missing-wash);
+  border: 1px solid var(--missing-line);
+  border-radius: var(--radius);
+}
+
+.conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.condition {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  min-height: 24px;
+}
+
+.condition:hover {
+  background: var(--surface-sunken);
+}
+
+.conditionOn {
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.conditionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.requirement {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.match {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+}
+
+.matchGlyph {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.match[data-match="matches"] {
+  color: var(--fact);
+  background: var(--fact-wash);
+  border-color: var(--fact-line);
+}
+
+.match[data-match="conflicts"] {
+  color: var(--missing);
+  background: var(--missing-wash);
+  border-color: var(--missing-line);
+}
+
+.match[data-match="unknown"] {
+  color: var(--uncertain);
+  background: var(--uncertain-wash);
+  border-color: var(--uncertain-line);
+}
+
+.explanation {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-tertiary);
+}
+
+.open {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  padding: 7px 13px;
+  min-height: 32px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.open:hover {
+  background: var(--surface-sunken);
+}
+
+/* ---------- the form ---------- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.formNote {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-tertiary);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+}
+
+.hint {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-quaternary);
+}
+
+.input {
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  padding: 7px 9px;
+  min-height: 32px;
+  width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.formFoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.check {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+  border: 0;
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.check:hover:not(:disabled) {
+  background: var(--ink-secondary);
+}
+
+.check:disabled,
+.forget:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.forget {
+  font-size: 12.5px;
+  color: var(--ink-tertiary);
+  background: none;
+  border: 0;
+  padding: 6px 4px;
+  min-height: 24px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.forget:hover:not(:disabled) {
+  color: var(--ink);
+}

@@ -103,17 +103,32 @@ class Plan:
     broken_cycles: tuple[tuple[str, str], ...] = ()
     #: Ids referenced as prerequisites that no action defines.
     dangling_dependencies: tuple[tuple[str, str], ...] = ()
+    #: Actions the reader has marked done.
+    completed: frozenset[str] = frozenset()
 
     @property
     def is_feasible(self) -> bool:
+        """Whether the work still outstanding can be finished in time.
+
+        Completed actions are excluded deliberately. A step finished last week
+        is not a schedule problem, and leaving it in meant a plan could never
+        stop reporting itself infeasible however much of it got done.
+        """
         return all(
-            item.slack_days is None or item.slack_days >= 0 for item in self.scheduled
+            item.slack_days is None or item.slack_days >= 0
+            for item in self.outstanding
+        )
+
+    @property
+    def outstanding(self) -> tuple[ScheduledAction, ...]:
+        return tuple(
+            item for item in self.scheduled if item.action.id not in self.completed
         )
 
     @property
     def next_actions(self) -> tuple[ScheduledAction, ...]:
         """Actions that can be started immediately, tightest deadline first."""
-        ready = [item for item in self.scheduled if not item.blocked_by]
+        ready = [item for item in self.outstanding if not item.blocked_by]
         ready.sort(key=lambda item: (_slack_key(item), item.order))
         return tuple(ready)
 
@@ -173,6 +188,7 @@ def build_plan(
         scheduled=tuple(scheduled),
         broken_cycles=broken,
         dangling_dependencies=dangling,
+        completed=frozenset(completed & by_id.keys()),
     )
 
 
@@ -322,16 +338,21 @@ def _prioritize(
     if slack_days < 0:
         return (
             Priority.OVERDUE,
-            f"{source} Needed to start {abs(slack_days)} day(s) ago to finish in time.",
+            f"{source} Needed to start {_days(abs(slack_days))} ago to finish in time.",
         )
     if slack_days <= _CRITICAL_SLACK:
-        return Priority.CRITICAL, f"{source} Must start within {slack_days} day(s)."
+        within = "today" if slack_days == 0 else f"within {_days(slack_days)}"
+        return Priority.CRITICAL, f"{source} Must start {within}."
     if slack_days <= _HIGH_SLACK:
         blocking = " It also blocks later work." if blocks_others else ""
-        return Priority.HIGH, f"{source} {slack_days} day(s) of buffer.{blocking}"
+        return Priority.HIGH, f"{source} {_days(slack_days)} of buffer.{blocking}"
     if slack_days <= _MEDIUM_SLACK:
-        return Priority.MEDIUM, f"{source} {slack_days} day(s) of buffer."
-    return Priority.LOW, f"{source} {slack_days} day(s) of buffer."
+        return Priority.MEDIUM, f"{source} {_days(slack_days)} of buffer."
+    return Priority.LOW, f"{source} {_days(slack_days)} of buffer."
+
+
+def _days(count: int) -> str:
+    return f"{count} day" if count == 1 else f"{count} days"
 
 
 def _deadline_key(action: Action) -> tuple[int, str]:

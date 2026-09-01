@@ -1,0 +1,145 @@
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  text-decoration: none;
+  padding: 7px 13px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--surface-sunken);
+}
+
+.disabled {
+  font-size: 13px;
+  color: var(--ink-quaternary);
+  padding: 7px 0;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.caveat {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-tertiary);
+}
+
+.draft {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.draftMeta {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-tertiary);
+  margin-bottom: 4px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-quaternary);
+  margin-top: 4px;
+}
+
+.subject,
+.body {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  padding: 8px 10px;
+  width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.body {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.subject:focus-visible,
+.body:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.draftFoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.copy {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--ink);
+  border: 0;
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.copy:hover {
+  background: var(--ink-secondary);
+}
+
+.mail {
+  font-size: 12.5px;
+  color: var(--ink-tertiary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 6px 4px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mail:hover {
+  color: var(--ink);
+}
+
+.live {
+  font-size: 12px;
+  color: var(--fact);
+  min-height: 1em;
+}

@@ -104,6 +104,71 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+/* The left column holds the plan and, when there is more than one document,
+   the comparison surfaces above it. It owns the scroll for all of them. */
+.left {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--paper);
+}
+
+.sessionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 24px;
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--line);
+}
+
+.sessionLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sessionControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.sessionSelect,
+.sessionButton {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  padding: 5px 10px;
+  min-height: 32px;
+  max-width: 190px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.sessionButton {
+  font-weight: 500;
+}
+
+.sessionButton:hover:not(:disabled),
+.sessionSelect:hover {
+  background: var(--surface-sunken);
+}
+
+.sessionButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 @media (min-width: 1440px) {
   .workspace {
     grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
@@ -119,6 +184,16 @@
     grid-template-rows: auto auto;
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  .left {
+    height: auto;
+    min-height: auto;
+    overflow-y: visible;
+  }
+
+  .sessionBar {
+    padding-inline: 18px;
   }
 
   .timing {
