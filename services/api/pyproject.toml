@@ -25,6 +25,7 @@ dependencies = [
     # RS256 verification of Clerk session tokens. The `crypto` extra pulls in
     # `cryptography`, without which PyJWT can only handle HMAC.
     "PyJWT[crypto]>=2.8,<3.0",
+    "SQLAlchemy>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +35,12 @@ dependencies = [
 ocr = [
     "pytesseract>=0.3.10,<1.0",
     "pillow>=10.0,<14.0",
+]
+# The Postgres driver. Optional because the store falls back to SQLite and to
+# memory, so the whole suite runs without it -- and because a clone that only
+# wants to read the code should not need to build a database driver.
+postgres = [
+    "psycopg[binary]>=3.1,<4.0",
 ]
 dev = [
     "pytest>=8.0",

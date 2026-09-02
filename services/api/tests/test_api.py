@@ -356,29 +356,3 @@ class TestCrossDocument:
         )
 
         assert response.status_code == 422
-
-
-def test_store_evicts_the_oldest_beyond_capacity(client):
-    """Memory stays bounded no matter how many documents are analysed."""
-    from app.main import Store
-    from app.main import store as live
-
-    ids = [
-        client.post(
-            "/v1/documents/text",
-            json={"text": f"Submit form {index} before 1 October 2026."},
-        ).json()["document_id"]
-        for index in range(3)
-    ]
-
-    from tests.conftest import TEST_USER
-
-    small = Store(capacity=2)
-    for document_id in ids:
-        record = live.get(document_id, owner_id=TEST_USER)
-        assert record is not None
-        small.put(record)
-
-    assert len(small.recent(owner_id=TEST_USER)) == 2
-    assert small.get(ids[0], owner_id=TEST_USER) is None
-    assert small.get(ids[2], owner_id=TEST_USER) is not None

@@ -46,6 +46,14 @@ jobs:
       - name: Tests
         run: pytest -q
 
+      # The store has two implementations and only one of them is the default.
+      # Running the suite again against a real database is what stops them
+      # drifting apart in the direction nobody exercises locally.
+      - name: Tests against a database
+        run: pytest -q
+        env:
+          DATABASE_URL: sqlite:///./ci.db
+
   api-without-ocr:
     name: API (no Tesseract, no OCR extras)
     runs-on: ubuntu-latest

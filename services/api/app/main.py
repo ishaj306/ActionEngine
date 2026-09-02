@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import logging
 import os
-from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from threading import Lock
+from hashlib import sha256
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
@@ -39,6 +38,7 @@ from app.comparison.crossdoc import review
 from app.modules.ingestion.document import ParsedDocument, UnsupportedDocument, parse
 from app.modules.reasoning.relevance import Profile
 from app.pipeline import Analysis, analyse
+from app.store import DocumentStore, StoredDocument, build_store
 
 logger = logging.getLogger("action_engine")
 
@@ -56,90 +56,23 @@ _ALLOWED_ORIGINS = [
 ]
 
 
-@dataclass(slots=True)
-class Record:
-    """A document, its analysis, and the working state the reader owns.
+@dataclass(frozen=True, slots=True)
+class Reading:
+    """A stored document with its plan worked out.
 
-    The parsed document is kept rather than only its text. Re-analysing from
-    extracted text alone would silently flatten a multi-page PDF onto page one
-    and take every evidence citation with it, so the state that produced the
-    page map has to survive as long as the analysis does.
+    Not persisted. The plan is re-derived on every read -- about five
+    milliseconds -- rather than cached in a column, because the analysis shape
+    changes with every extraction improvement and a column holding last month's
+    output is worse than no column: it looks current.
     """
 
-    #: Who uploaded it. Every read is filtered on this.
-    owner_id: str
+    stored: StoredDocument
     analysis: AnalysisOut
-    #: The same reading in domain form. Cross-document reasoning works on
-    #: findings rather than on the wire model, and both are produced by the one
-    #: call in `_record`, so they cannot drift apart.
+    #: The same reading in domain form, for cross-document reasoning.
     reading: Analysis
-    document: ParsedDocument
-    filename: str
-    completed: frozenset[str] = frozenset()
-    profile: Profile | None = None
 
 
-class Store:
-    """Bounded, thread-safe map of records, keyed by document id.
-
-    Ownership is enforced here rather than in the handlers. A filter that lives
-    at the call site has to be remembered at every call site, and forgetting it
-    once in one route is enough to expose everything; a store that cannot
-    return another tenant's record makes the mistake impossible to write.
-    """
-
-    def __init__(self, capacity: int = MAX_RETAINED_DOCUMENTS) -> None:
-        self._items: OrderedDict[str, Record] = OrderedDict()
-        self._capacity = capacity
-        self._lock = Lock()
-
-    def put(self, record: Record) -> None:
-        with self._lock:
-            key = record.analysis.document_id
-            self._items[key] = record
-            self._items.move_to_end(key)
-            while len(self._items) > self._capacity:
-                self._items.popitem(last=False)
-
-    def get(self, document_id: str, *, owner_id: str) -> Record | None:
-        """The record, or None -- including when it exists but is not theirs.
-
-        None rather than a distinct "forbidden" result on purpose. A 403 would
-        confirm that a document with this id exists, which is exactly what
-        someone probing for other people's ids wants to learn.
-        """
-        with self._lock:
-            found = self._items.get(document_id)
-            return found if found and found.owner_id == owner_id else None
-
-    def recent(self, *, owner_id: str) -> list[AnalysisOut]:
-        with self._lock:
-            return [
-                record.analysis
-                for record in reversed(self._items.values())
-                if record.owner_id == owner_id
-            ]
-
-    def delete(self, document_id: str, *, owner_id: str) -> bool:
-        with self._lock:
-            found = self._items.get(document_id)
-            if found is None or found.owner_id != owner_id:
-                return False
-            del self._items[document_id]
-            return True
-
-    def delete_all(self, *, owner_id: str) -> int:
-        """Everything this user uploaded. People are entitled to leave."""
-        with self._lock:
-            doomed = [
-                key for key, record in self._items.items() if record.owner_id == owner_id
-            ]
-            for key in doomed:
-                del self._items[key]
-            return len(doomed)
-
-
-store = Store()
+store: DocumentStore = build_store()
 
 app = FastAPI(
     title="Document → Action Engine",
@@ -261,35 +194,52 @@ def _record(
     document_id: str | None = None,
     completed: frozenset[str] = frozenset(),
     profile: Profile | None = None,
-) -> Record:
-    """Analyse a document under some working state, and store the result."""
-    analysis = analyse(
-        document,
-        today=date.today(),
-        # A random id, not a hash of the content. A content hash is identical for
-        # everyone who uploads the same circular, which turns a document id into
-        # a guess anyone can make about somebody else's upload.
-        document_id=document_id or uuid4().hex,
-        completed=completed,
-        profile=profile,
-    )
-    record = Record(
+) -> Reading:
+    """Store a document under some working state, and return its plan."""
+    stored = StoredDocument(
+        # A random id, not a hash of the content. A content hash is identical
+        # for everyone who uploads the same circular, which turns a document id
+        # into a guess anyone can make about somebody else's upload.
+        id=document_id or uuid4().hex,
         owner_id=owner_id,
-        analysis=AnalysisOut.of(analysis, filename=filename, text=document.text),
-        reading=analysis,
-        document=document,
         filename=filename,
+        content_hash=sha256(document.text.encode()).hexdigest(),
+        document=document,
         completed=completed,
         profile=profile,
     )
-    store.put(record)
-    return record
+    store.put(stored)
+    return _read(stored)
+
+
+def _read(stored: StoredDocument) -> Reading:
+    """Derive the plan for a stored document."""
+    analysis = analyse(
+        stored.document,
+        today=date.today(),
+        document_id=stored.id,
+        completed=stored.completed,
+        profile=stored.profile,
+    )
+    return Reading(
+        stored=stored,
+        analysis=AnalysisOut.of(
+            analysis, filename=stored.filename, text=stored.document.text
+        ),
+        reading=analysis,
+    )
 
 
 @app.get("/v1/documents", response_model=list[AnalysisOut])
 def list_documents(caller: Principal = Depends(current_user)) -> list[AnalysisOut]:
+    """The caller's recent documents, most recent first.
+
+    Bounded, because each one's plan is re-derived rather than read from a
+    cache. Twenty is generous for a listing and keeps the request in the tens
+    of milliseconds.
+    """
     request_limit.check(caller.user_id)
-    return store.recent(owner_id=caller.user_id)
+    return [_read(stored).analysis for stored in store.recent(owner_id=caller.user_id)]
 
 
 @app.get("/v1/documents/{document_id}", response_model=AnalysisOut)
@@ -316,7 +266,7 @@ def update_plan(
     """
     record = _require(document_id, caller)
 
-    completed = record.completed
+    completed = record.stored.completed
     if patch.completed is not None:
         known = {action.id for action in record.analysis.actions}
         unknown = sorted(set(patch.completed) - known)
@@ -327,15 +277,15 @@ def update_plan(
             )
         completed = frozenset(patch.completed)
 
-    profile = record.profile
+    profile = record.stored.profile
     if patch.clear_profile:
         profile = None
     elif patch.profile is not None:
         profile = patch.profile.to_domain()
 
     return _record(
-        record.document,
-        filename=record.filename,
+        record.stored.document,
+        filename=record.stored.filename,
         owner_id=caller.user_id,
         document_id=document_id,
         completed=completed,
@@ -361,7 +311,7 @@ def calendar(
         media_type="text/calendar; charset=utf-8",
         headers={
             "Content-Disposition": (
-                f'attachment; filename="{_ascii_slug(record.filename)}.ics"'
+                f'attachment; filename="{_ascii_slug(record.stored.filename)}.ics"'
             )
         },
     )
@@ -428,7 +378,7 @@ def portfolio(
         if document_id in seen:
             continue
         record = _require(document_id, caller)
-        seen[document_id] = (record.filename, record.reading)
+        seen[document_id] = (record.stored.filename, record.reading)
 
     if len(seen) < 2:
         raise HTTPException(
@@ -438,7 +388,7 @@ def portfolio(
     return PortfolioOut.of(review(seen))
 
 
-def _require(document_id: str, caller: Principal) -> Record:
+def _require(document_id: str, caller: Principal) -> Reading:
     """The caller's document, or 404.
 
     Someone else's document is a 404 rather than a 403, because a 403 confirms
@@ -448,7 +398,7 @@ def _require(document_id: str, caller: Principal) -> Record:
     found = store.get(document_id, owner_id=caller.user_id)
     if found is None:
         raise HTTPException(status_code=404, detail="No such document.")
-    return found
+    return _read(found)
 
 
 def _ascii_slug(filename: str) -> str:

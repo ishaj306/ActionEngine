@@ -32,11 +32,11 @@ def authenticated():
     would hide behind that invisibility.
     """
     app.dependency_overrides[current_user] = lambda: Principal(user_id=TEST_USER)
-    store._items.clear()
+    store.clear()
     # Limits are per-user and per-process; without this a long suite exhausts
     # the hourly quota and later tests fail for a reason unrelated to them.
     upload_limit.reset()
     request_limit.reset()
     yield
     app.dependency_overrides.clear()
-    store._items.clear()
+    store.clear()

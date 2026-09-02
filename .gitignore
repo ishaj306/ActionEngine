@@ -40,3 +40,7 @@ strategy.html
 
 # Editable install metadata
 *.egg-info/
+
+# Local database files
+*.db
+*.db-journal

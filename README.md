@@ -255,7 +255,35 @@ An integration test drives every route as a second user and requires a 404 from
 each. Its failure is a disclosure, not a bug report.
 
 Per-account rate limits are in-process, so two replicas each allow the full
-quota. That is a real limitation and the fix belongs with the persistence work.
+quota. That is a real limitation, stated in the module rather than hidden; the
+fix is a shared counter, and it belongs with the deployment work rather than
+ahead of it.
+
+---
+
+## Storage
+
+`DATABASE_URL` chooses: unset gives an in-process map, a URL gives Postgres.
+Both implementations satisfy one protocol and are run through the same contract
+suite, because a persistence layer tested only in the configuration nobody
+deploys is not tested. CI runs the whole API suite twice, once against each.
+
+**What is stored is the document, not the analysis.** A row holds the text, the
+page map and the reader's own state; the plan is re-derived on read in about
+five milliseconds. Caching the analysis would be faster and would be the wrong
+trade — the analysis shape changes with every extraction improvement, and a
+column holding last month's output is worse than no column because it looks
+current. The document and what the reader ticked off are the only durable facts
+here.
+
+The uploaded file itself is not kept. Once the text is out, holding somebody's
+scanned identity document on disk buys nothing and adds a category of breach.
+
+Two gaps worth naming. There are no migrations: `create_all` bootstraps the
+schema, which is honest for a system with no deployment and no data, and the
+first schema change after either exists needs Alembic. And SQLite stands in for
+Postgres in the tests — the same SQLAlchemy code path and the same SQL, but not
+Postgres behaviour under concurrency.
 
 ---
 
