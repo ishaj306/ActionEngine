@@ -36,14 +36,19 @@ ENV PATH="/home/engine/.local/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-COPY --from=build /dist/*.whl /tmp/wheels/
-# Extras applied to the built wheel directly. All three are included because a
-# container that cannot read a scan, cannot reach Postgres, or cannot run the
-# model arm is a container that has to be rebuilt to change its mind.
-RUN set -eux; \
-    wheel="$(ls /tmp/wheels/*.whl)"; \
-    python -m pip install --no-cache-dir --user "${wheel}[ocr,postgres,model]"; \
-    rm -rf /tmp/wheels
+# The wheel is bind-mounted rather than copied, so it never becomes part of a
+# layer and there is nothing to clean up afterwards. The COPY-then-rm version
+# of this was wrong twice over: the rm ran as `engine` against a root-owned
+# file and failed the build, and even had it succeeded it would have reclaimed
+# nothing, because the COPY layer keeps the file whatever a later layer deletes.
+#
+# All three extras are installed because a container that cannot read a scan,
+# cannot reach Postgres, or cannot run the model arm is one that has to be
+# rebuilt to change its mind.
+RUN --mount=type=bind,from=build,source=/dist,target=/wheels \
+    set -eux; \
+    wheel="$(ls /wheels/*.whl)"; \
+    python -m pip install --no-cache-dir --user "${wheel}[ocr,postgres,model]"
 
 EXPOSE 8000
 
