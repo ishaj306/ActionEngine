@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 
 from app.modules.action_engine.planner import ActionVerb
+from app.modules.extraction.requirements import names_an_artefact
 
 #: Verbs grouped by what the reader has to do, not by dictionary sense.
 _VERB_LEXICON: dict[ActionVerb, frozenset[str]] = {
@@ -322,29 +323,90 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
         char_end=sentence.char_end,
         confidence=confidence,
         rationale=rationale,
-        requires=_requirements_in(sentence.text, verb_end),
+        requires=_requirements_in(sentence.text, verb_end, verb=verb),
     )
 
 
-def _requirements_in(sentence: str, verb_end: int = 0) -> tuple[str, ...]:
+#: Objects that refer back rather than naming anything. "Submit it to the
+#: counter" demands nothing new; treating "it" as a requirement produced a
+#: checklist entry reading "Submit it".
+_PRONOUN_OBJECT = re.compile(r"^(?:it|them|this|these|those|that|one|same|so)$", re.I)
+
+
+def _requirements_in(
+    sentence: str,
+    verb_end: int = 0,
+    *,
+    verb: ActionVerb | None = None,
+) -> tuple[str, ...]:
     """Pull the things the sentence demands.
 
-    Two shapes. Most notices flag them with a cue -- "along with", "enclosing".
-    The rest simply list them as objects of the instruction: "upload your
-    resume, a copy of your ID card, and the offer letter". Reading only the
-    cued form misses every requirement in the second kind of sentence.
+    Three shapes, and the third was missing. Most notices flag requirements with
+    a cue -- "along with", "enclosing". Some list them as a comma series after
+    the verb. But the commonest shape of all is the plain direct object:
+    "submit the consent form", "upload your statement of purpose". Reading only
+    the first two missed ten of the twelve requirements in the benchmark.
+
+    The direct object is the weakest signal of the three, because the object of
+    an instruction is not always a thing -- "complete the registration" names
+    the action, not an artefact. So it is kept only when it names something the
+    reader could actually go and get.
     """
     items: list[str] = []
+    _absorb(items, _object_after_verb(sentence, verb_end, verb))
+
+    cued: list[str] = []
     for cue in _REQUIREMENT_CUES.finditer(sentence):
         tail = _before_trailing_clause(sentence[cue.end() :])
         for part in re.split(r",|\band\b|\bor\b|/|;", tail):
             cleaned = _clean_requirement(part)
-            if cleaned and cleaned.lower() not in {item.lower() for item in items}:
-                items.append(cleaned)
+            if cleaned:
+                _absorb(cued, (cleaned,))
 
-    if items:
-        return tuple(items[:_MAX_REQUIREMENTS])
-    return _series_after_verb(sentence, verb_end)
+    # A comma series and an explicit cue describe the same list two ways, so
+    # reading both duplicates it.
+    _absorb(items, tuple(cued) or _series_after_verb(sentence, verb_end))
+    return tuple(items[:_MAX_REQUIREMENTS])
+
+
+def _absorb(items: list[str], incoming: tuple[str, ...]) -> None:
+    seen = {item.lower() for item in items}
+    for candidate in incoming:
+        if candidate.lower() not in seen:
+            seen.add(candidate.lower())
+            items.append(candidate)
+
+
+def _object_after_verb(
+    sentence: str,
+    verb_end: int,
+    verb: ActionVerb | None,
+) -> tuple[str, ...]:
+    """The noun phrase the instruction acts on, when it names a real thing."""
+    # Attending names an event, never something to bring.
+    if verb is ActionVerb.ATTEND:
+        return ()
+
+    tail = _before_trailing_clause(sentence[verb_end:])
+
+    # The object ends where the list of accompanying documents begins. Without
+    # this the object of "submit the application form along with their income
+    # certificate" came out as one 55-character requirement naming both.
+    cue = _REQUIREMENT_CUES.search(tail)
+    if cue:
+        tail = tail[: cue.start()]
+
+    # "from"/"at"/"in" introduce where the thing comes from, which is useful
+    # prose and a poor name for a checklist entry: "Income certificate from
+    # Tehsildar s office." is the same requirement as "Income certificate",
+    # spelled worse.
+    head = re.split(
+        r"[,;]|\band\b|\bor\b|\bfrom\b|\bat\s+the\b|\bin\s+the\b", tail, maxsplit=1
+    )[0]
+    cleaned = _clean_requirement(head)
+    if not cleaned or _PRONOUN_OBJECT.match(cleaned):
+        return ()
+    return (cleaned,) if names_an_artefact(cleaned) else ()
 
 
 def _series_after_verb(sentence: str, verb_end: int) -> tuple[str, ...]:
@@ -360,7 +422,13 @@ def _series_after_verb(sentence: str, verb_end: int) -> tuple[str, ...]:
     found: list[str] = []
     for part in re.split(r",|\band\b|\bor\b|;", tail):
         cleaned = _clean_requirement(part)
-        if cleaned and cleaned.lower() not in {item.lower() for item in found}:
+        # Same filter as the direct object, for the same reason: a series
+        # picked out of an instruction contains further actions as well as
+        # things. "obtain the certificate, fill the form and submit it" put a
+        # checklist entry reading "Submit it" in front of the reader.
+        if not cleaned or not names_an_artefact(cleaned):
+            continue
+        if cleaned.lower() not in {item.lower() for item in found}:
             found.append(cleaned)
     return tuple(found[:_MAX_REQUIREMENTS]) if len(found) >= 2 else ()
 

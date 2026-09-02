@@ -179,7 +179,7 @@ def test_prose_without_dates_yields_nothing():
     assert find("Students are advised to read the instructions carefully.") == []
 
 
-class TestDeadlineCues:
+class TestDeadlineCueScope:
     """Whether a date is a cutoff or merely mentioned.
 
     Scoped to the date's own clause. A fixed lookback window was wrong in both

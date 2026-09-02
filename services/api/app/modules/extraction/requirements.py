@@ -39,6 +39,7 @@ _DOCUMENT_TERMS = frozenset(
     photograph photographs photo photos affidavit undertaking declaration
     form proforma letter offer noc receipt challan proof statement
     testimonial reference bonafide migration transfer character
+    report application synopsis thesis dissertation portfolio
     """.split()
 )
 
@@ -86,6 +87,33 @@ class Requirement:
         why they drive the scheduler's effort estimates.
         """
         return self.kind is RequirementKind.DOCUMENT
+
+
+def names_an_artefact(phrase: str) -> bool:
+    """Whether a phrase names something the reader can actually go and get.
+
+    Used to filter weakly-signalled requirements -- the direct object of an
+    instruction, or an item in a comma series -- where the syntax alone does not
+    say whether the phrase is a thing or the action nominalised. "Submit the
+    consent form" yields a form; "complete the registration on the portal"
+    yields nothing, because the registration *is* the action.
+
+    A bare information term does not qualify. `registration`, `name` and `age`
+    all appear in `_INFORMATION_TERMS`, and as the object of a verb they are
+    almost always the process rather than a value to have ready. The multi-word
+    phrases -- "bank account details", "contact number" -- are the real thing,
+    so those qualify and single terms do not.
+
+    Cued requirements skip this check. "Along with" is a strong enough signal on
+    its own, and filtering it would drop genuine items this lexicon has never
+    heard of.
+    """
+    text = phrase.strip()
+    if not text:
+        return False
+    if set(_TOKEN.findall(text.lower())) & _DOCUMENT_TERMS:
+        return True
+    return any(pattern.search(text) for pattern in _INFORMATION_PHRASES)
 
 
 def classify_requirement(phrase: str) -> RequirementKind:

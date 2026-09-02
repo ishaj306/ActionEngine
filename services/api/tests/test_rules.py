@@ -260,3 +260,68 @@ class TestGapDetection:
         text = "Submit the form to Room 12, Administrative Block, before 18 September 2026."
 
         assert extract_gaps(text) == []
+
+
+class TestDirectObjectRequirements:
+    """The commonest shape of all: the thing the instruction acts on.
+
+    Rules read cued lists ("along with ...") and comma series, and missed the
+    plain object entirely -- ten of the twelve requirements in the benchmark.
+    """
+
+    @pytest.mark.parametrize(
+        ("sentence", "expected"),
+        [
+            ("Students must submit the consent form.", "consent form"),
+            ("Applicants must upload their statement of purpose.", "statement of purpose"),
+            ("You must submit the fee concession form.", "fee concession form"),
+            ("Candidates must submit the project report.", "project report"),
+        ],
+    )
+    def test_the_object_of_an_instruction_is_a_requirement(self, sentence, expected):
+        found = extract_actions(sentence)
+
+        assert found
+        assert any(expected in item.lower() for item in found[0].requires)
+
+    def test_an_action_nominalised_is_not_a_requirement(self):
+        """"Complete the registration" names the action, not a thing to bring."""
+        found = extract_actions("Students must complete the registration on the portal.")
+
+        assert found
+        assert found[0].requires == ()
+
+    def test_an_event_attended_is_not_a_requirement(self):
+        found = extract_actions("Candidates must attend the verification session.")
+
+        assert found
+        assert found[0].requires == ()
+
+    def test_a_pronoun_object_is_not_a_requirement(self):
+        """"Submit it" demands nothing new, and read as one it looked absurd."""
+        found = extract_actions(
+            "Students must obtain the certificate, fill the form and submit it "
+            "to the counter."
+        )
+
+        assert found
+        assert not any("submit it" in item.lower() for item in found[0].requires)
+
+    def test_the_object_stops_where_the_cued_list_begins(self):
+        """Otherwise the object swallows the documents that accompany it."""
+        found = extract_actions(
+            "Students must submit the application form along with their income "
+            "certificate."
+        )
+
+        assert found
+        assert "Application form" in found[0].requires
+        assert any("income certificate" in item.lower() for item in found[0].requires)
+
+    def test_the_object_stops_before_where_it_comes_from(self):
+        found = extract_actions(
+            "Candidates should obtain the income certificate from the Tehsildar."
+        )
+
+        assert found
+        assert found[0].requires == ("Income certificate",)
