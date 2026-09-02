@@ -1,0 +1,30 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "expired"
+  ],
+  "deadlines": [
+    {
+      "date": "2020-01-04",
+      "quote": "4 January 2020",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "required to submit the completed form",
+      "gist": "submit the form",
+      "deadline": "2020-01-04"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "completed form",
+      "kind": "document"
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "Six years past. Extraction is right; presenting it as an actionable deadline is not."
+}

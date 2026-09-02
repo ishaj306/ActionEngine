@@ -1,0 +1,35 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "gaps"
+  ],
+  "deadlines": [],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must submit the project report",
+      "gist": "submit the project report"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "project report",
+      "kind": "document"
+    }
+  ],
+  "conditions": [
+    {
+      "attribute": "year",
+      "comparator": "not_comparable",
+      "value": null
+    }
+  ],
+  "gaps": [
+    "the concerned department",
+    "before the last date",
+    "the online portal",
+    "A nominal fee applies",
+    "the relevant rules"
+  ],
+  "notes": "Five things the reader needs and the document does not state. 'Final year' is a real condition the engine cannot evaluate."
+}

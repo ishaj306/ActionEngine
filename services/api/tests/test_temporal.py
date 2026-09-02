@@ -177,3 +177,58 @@ class TestSpans:
 
 def test_prose_without_dates_yields_nothing():
     assert find("Students are advised to read the instructions carefully.") == []
+
+
+class TestDeadlineCues:
+    """Whether a date is a cutoff or merely mentioned.
+
+    Scoped to the date's own clause. A fixed lookback window was wrong in both
+    directions at once, and each of these cases pins one of the ways it failed.
+    """
+
+    def test_a_cue_beyond_the_old_window_is_still_found(self):
+        """The cue here sits 56 characters before the date."""
+        text = "The last date for submission of the bursary application was 4 January 2020."
+
+        assert only(text).is_deadline
+
+    def test_a_comma_series_gives_each_date_its_own_verb(self):
+        """One "close" must not make every date in the sentence a deadline."""
+        found = find(
+            "Forms open 1 August 2026, close 18 September 2026, "
+            "results 30 October 2026."
+        )
+
+        assert [item.is_deadline for item in found] == [False, True, False]
+
+    def test_a_cue_survives_a_wrapped_line(self):
+        """Notices are hard-wrapped; the cue and its date land on separate lines.
+
+        Treating a single newline as a clause boundary severed the two and lost
+        the deadline in the most ordinary document in the corpus.
+        """
+        text = "Submit the completed form to the designated office before\n18 September 2026."
+
+        assert only(text).is_deadline
+
+    def test_a_blank_line_does_separate_clauses(self):
+        text = "Applications close.\n\nThe orientation is on 8 August 2026."
+
+        assert not only(text).is_deadline
+
+    def test_a_cue_stated_after_the_date_still_governs_it(self):
+        assert only("18 September 2026 is the last date for submission.").is_deadline
+
+    def test_a_commencement_date_is_not_a_deadline(self):
+        text = "This policy comes into force on 1 April 2026 and applies to all."
+
+        assert not only(text).is_deadline
+
+    def test_an_event_date_is_not_a_deadline(self):
+        assert not only("The meeting is on 8 August 2026.").is_deadline
+
+    def test_a_cue_is_matched_on_word_boundaries(self):
+        """Substring matching fired "by" inside unrelated words."""
+        text = "The nearby centre was inaugurated on 8 August 2026."
+
+        assert not only(text).is_deadline

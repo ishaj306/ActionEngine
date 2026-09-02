@@ -1,0 +1,47 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "bug-3",
+    "optional"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-11-05",
+      "quote": "5 November 2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must upload their statement of purpose",
+      "gist": "upload statement of purpose",
+      "deadline": "2026-11-05"
+    },
+    {
+      "verb": "prepare",
+      "quote": "may optionally attach a recommendation letter",
+      "gist": "attach recommendation letter",
+      "optional": true
+    }
+  ],
+  "requirements": [
+    {
+      "text": "statement of purpose",
+      "kind": "document"
+    },
+    {
+      "text": "recommendation letter",
+      "kind": "document",
+      "optional": true
+    },
+    {
+      "text": "writing sample",
+      "kind": "document",
+      "optional": true
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "Nothing here except the statement of purpose is mandatory. v1 lists the recommendation letter as a hard requirement."
+}

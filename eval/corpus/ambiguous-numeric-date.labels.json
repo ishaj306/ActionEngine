@@ -1,0 +1,30 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "ambiguous-date"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-04-03",
+      "quote": "03/04/2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must submit the consent form",
+      "gist": "submit consent form",
+      "deadline": "2026-04-03"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "consent form",
+      "kind": "document"
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "Day/month per Indian convention. The engine must surface the month/day reading too and must not report high confidence."
+}

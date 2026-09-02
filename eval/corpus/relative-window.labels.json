@@ -1,0 +1,30 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "relative-date"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-09-11",
+      "quote": "within 10 days",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "prepare",
+      "quote": "must be completed within 10 days",
+      "gist": "complete registration",
+      "deadline": "2026-09-11"
+    },
+    {
+      "verb": "attend",
+      "quote": "must attend the verification session",
+      "gist": "attend verification"
+    }
+  ],
+  "requirements": [],
+  "conditions": [],
+  "gaps": [],
+  "notes": "The period is relative to the circular's own date, not to the day the file is uploaded. v1 anchors to today, which is wrong whenever the document is not read the day it is issued."
+}

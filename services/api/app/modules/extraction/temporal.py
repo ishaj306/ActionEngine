@@ -79,11 +79,28 @@ _WINDOW = re.compile(
 #: Phrases that mark a date as the thing the reader must act before.
 _DEADLINE_CUES = (
     "before", "by", "no later than", "not later than", "deadline",
-    "last date", "due", "closes", "closing", "on or before", "latest by",
+    "last date", "final date", "due", "close", "closes", "closing", "closed",
+    "on or before", "latest by", "latest", "ends", "ending", "expires",
+    "expiry", "cut-off", "cutoff", "till", "until", "up to", "upto",
+    "positively",
 )
 
-#: How far back to look for a deadline cue preceding a date.
-_CUE_WINDOW = 48
+#: Matched on word boundaries. Substring matching made "by" fire inside
+#: "nearby" and, worse, made "close" fail because only "closes" was listed.
+_CUE_PATTERN = re.compile(
+    r"\b(?:" + "|".join(cue.replace(" ", r"\s+").replace("-", r"[- ]") for cue in _DEADLINE_CUES) + r")\b",
+    re.I,
+)
+
+#: A date is governed by the cues in its own clause. Commas matter here: a
+#: series gives each date a separate verb, and ignoring the boundary makes one
+#: "closes" mark every date in the sentence as a deadline.
+#:
+#: A *single* newline is not a boundary. Notices are hard-wrapped, so "before"
+#: and the date it governs routinely land on different lines; treating that as
+#: a clause break severed the cue from its date and silently lost the deadline
+#: in the most ordinary document there is. Only a blank line separates clauses.
+_CLAUSE_BREAK = re.compile(r"[,;:.]|\n[ \t]*\n")
 
 
 class TemporalKind(str, Enum):
@@ -334,8 +351,35 @@ def _drop_overlaps(items: list[TemporalExpression]) -> list[TemporalExpression]:
 
 
 def _has_deadline_cue(text: str, position: int) -> bool:
-    window = text[max(0, position - _CUE_WINDOW) : position].lower()
-    return any(cue in window for cue in _DEADLINE_CUES)
+    """Whether a date is framed as a cutoff rather than merely mentioned.
+
+    The search is scoped to the date's own clause, which matters more than it
+    sounds. A fixed lookback window is wrong in both directions: too short and
+    it misses "The last date for submission of the bursary application was
+    4 January 2020" (the cue is 56 characters away); too long and it spills
+    across a comma series, so that "opens 1 August, closes 18 September,
+    results 30 October" marks all three as deadlines because one of them said
+    "closes".
+
+    Clause scope gets every case in that sentence right, because a list like
+    that gives each date its own verb.
+    """
+    start, end = _clause_bounds(text, position)
+    before = text[start:position].lower()
+    if _CUE_PATTERN.search(before):
+        return True
+    # "18 September 2026 is the last date for submission" states the cue after
+    # the date. Still the same clause, so still governs it.
+    return bool(_CUE_PATTERN.search(text[position:end].lower()))
+
+
+def _clause_bounds(text: str, position: int) -> tuple[int, int]:
+    """The clause containing `position`, delimited by punctuation."""
+    start = 0
+    for match in _CLAUSE_BREAK.finditer(text, 0, position):
+        start = match.end()
+    following = _CLAUSE_BREAK.search(text, position)
+    return start, following.start() if following else len(text)
 
 
 def _valid_day(day: int, month: int) -> bool:

@@ -1,0 +1,19 @@
+{
+  "document_type": "policy",
+  "tags": [
+    "classification",
+    "negative"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-04-01",
+      "quote": "1 April 2026",
+      "is_deadline": false
+    }
+  ],
+  "actions": [],
+  "requirements": [],
+  "conditions": [],
+  "gaps": [],
+  "notes": "The date is a commencement, not a cutoff. No actions."
+}

@@ -1,0 +1,59 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "canonical",
+    "dependency",
+    "gaps"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-09-18",
+      "quote": "18 September 2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must submit the completed application form",
+      "gist": "submit the application",
+      "deadline": "2026-09-18"
+    },
+    {
+      "verb": "obtain",
+      "quote": "should obtain the income certificate",
+      "gist": "obtain the income certificate"
+    },
+    {
+      "verb": "confirm",
+      "quote": "Please verify your bank account details",
+      "gist": "verify bank details"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "income certificate",
+      "kind": "document"
+    },
+    {
+      "text": "self-attested copy of the previous marksheet",
+      "kind": "document"
+    },
+    {
+      "text": "bank account details",
+      "kind": "information"
+    }
+  ],
+  "conditions": [
+    {
+      "attribute": "year",
+      "comparator": "equals",
+      "value": "3"
+    }
+  ],
+  "gaps": [
+    "designated office",
+    "A nominal fee"
+  ],
+  "notes": "The submit action has a stated deadline; the obtain action must inherit it."
+}

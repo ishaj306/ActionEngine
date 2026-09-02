@@ -1,0 +1,37 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "series-requirements"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-09-12",
+      "quote": "12 September 2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must upload their updated resume",
+      "gist": "upload the documents"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "updated resume",
+      "kind": "document"
+    },
+    {
+      "text": "scanned copy of the college identity card",
+      "kind": "document"
+    },
+    {
+      "text": "internship offer letter",
+      "kind": "document"
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "No 'along with' cue. The requirements are the objects of the verb."
+}

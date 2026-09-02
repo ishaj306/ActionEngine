@@ -1,0 +1,37 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "bug-1",
+    "date-series"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-08-01",
+      "quote": "1 August 2026",
+      "is_deadline": false
+    },
+    {
+      "date": "2026-09-18",
+      "quote": "18 September 2026",
+      "is_deadline": true
+    },
+    {
+      "date": "2026-10-30",
+      "quote": "30 October 2026",
+      "is_deadline": false
+    }
+  ],
+  "actions": [
+    {
+      "verb": "prepare",
+      "quote": "must complete the registration on the portal",
+      "gist": "complete registration"
+    }
+  ],
+  "requirements": [],
+  "conditions": [],
+  "gaps": [
+    "The portal opens"
+  ],
+  "notes": "Three dates in one sentence. Only the closing date is a cutoff. v1 extracts none of them."
+}

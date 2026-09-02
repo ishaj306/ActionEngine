@@ -1,0 +1,53 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "bug-2",
+    "conditional"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-10-12",
+      "quote": "12 October 2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must submit the fee concession form",
+      "gist": "submit the form",
+      "deadline": "2026-10-12"
+    },
+    {
+      "verb": "submit",
+      "quote": "you must also submit a caste certificate",
+      "gist": "submit caste certificate",
+      "conditional": true
+    },
+    {
+      "verb": "submit",
+      "quote": "must additionally furnish a domicile",
+      "gist": "furnish domicile certificate",
+      "conditional": true
+    }
+  ],
+  "requirements": [
+    {
+      "text": "fee concession form",
+      "kind": "document"
+    },
+    {
+      "text": "caste certificate",
+      "kind": "document",
+      "conditional": true
+    },
+    {
+      "text": "domicile certificate",
+      "kind": "document",
+      "conditional": true
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "Two of three obligations apply only to some readers. v1 drops both conditions and presents all three as mandatory. It also misses 'furnish' entirely -- not in the verb lexicon."
+}

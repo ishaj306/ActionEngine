@@ -1,0 +1,13 @@
+Software Engineer -- Backend
+
+About the role
+You will build and maintain the services behind our payments platform.
+
+Responsibilities
+Design and ship backend services. Review code. Mentor junior engineers.
+
+Qualifications
+At least 3 years of experience in Python. Strong knowledge of SQL.
+A bachelor's degree in Computer Science or equivalent experience.
+
+We offer a competitive salary and comprehensive benefits.

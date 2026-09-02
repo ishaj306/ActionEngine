@@ -1,0 +1,36 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "bug-4",
+    "contradiction"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-09-18",
+      "quote": "before 18 September 2026",
+      "is_deadline": true
+    },
+    {
+      "date": "2026-09-22",
+      "quote": "22 September 2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must submit the examination form",
+      "gist": "submit exam form",
+      "deadline": "2026-09-18"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "examination form",
+      "kind": "document"
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "The document contradicts itself. Both dates must be reported and neither may be asserted as a confident FACT. v1 returns both at 0.97."
+}

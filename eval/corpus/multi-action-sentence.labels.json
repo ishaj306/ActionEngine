@@ -1,0 +1,47 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "bug-5",
+    "multi-action"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-06-30",
+      "quote": "30 June 2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "obtain",
+      "quote": "must obtain the clearance certificate",
+      "gist": "obtain clearance certificate",
+      "deadline": "2026-06-30"
+    },
+    {
+      "verb": "prepare",
+      "quote": "fill the no-dues form",
+      "gist": "fill the no-dues form",
+      "deadline": "2026-06-30"
+    },
+    {
+      "verb": "submit",
+      "quote": "submit it to the library counter",
+      "gist": "submit to the counter",
+      "deadline": "2026-06-30"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "clearance certificate",
+      "kind": "document"
+    },
+    {
+      "text": "no-dues form",
+      "kind": "document"
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "Three actions, two requirements. v1 finds one action and turns the other two into requirements named 'Fill form' and 'Submit it'."
+}

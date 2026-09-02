@@ -1,0 +1,34 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "buried",
+    "lexicon"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-08-08",
+      "quote": "8 August 2026",
+      "is_deadline": false
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "furnish a domicile",
+      "gist": "furnish domicile certificate"
+    }
+  ],
+  "requirements": [
+    {
+      "text": "domicile certificate",
+      "kind": "document"
+    },
+    {
+      "text": "admission form",
+      "kind": "document"
+    }
+  ],
+  "conditions": [],
+  "gaps": [],
+  "notes": "'furnish' is not in the verb lexicon and the obligation marker ('expects that') is not one v1 recognises."
+}

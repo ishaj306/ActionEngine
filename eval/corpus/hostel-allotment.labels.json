@@ -1,0 +1,46 @@
+{
+  "document_type": "notice",
+  "tags": [
+    "eligibility"
+  ],
+  "deadlines": [
+    {
+      "date": "2026-07-20",
+      "quote": "20 July 2026",
+      "is_deadline": true
+    }
+  ],
+  "actions": [
+    {
+      "verb": "submit",
+      "quote": "must be submitted before 20 July 2026",
+      "gist": "submit the application",
+      "deadline": "2026-07-20"
+    }
+  ],
+  "requirements": [],
+  "conditions": [
+    {
+      "attribute": "year",
+      "comparator": "at_least",
+      "value": "2"
+    },
+    {
+      "attribute": "score",
+      "comparator": "at_least",
+      "value": "55"
+    },
+    {
+      "attribute": "age",
+      "comparator": "at_most",
+      "value": "25"
+    },
+    {
+      "attribute": "domicile",
+      "comparator": "one_of",
+      "value": "Kerala"
+    }
+  ],
+  "gaps": [],
+  "notes": "'second year and above' is a floor, not an equality -- v1 reads it as equals and will wrongly exclude a third-year student."
+}
