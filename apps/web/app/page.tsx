@@ -20,6 +20,8 @@ import {
   type Portfolio,
   type Profile,
 } from "@/lib/api";
+import Link from "next/link";
+
 import { SAMPLES } from "@/lib/samples";
 import { ChangesBanner, PortfolioPanel } from "@/components/CrossDocument";
 import { PlanPane, type Selection } from "@/components/PlanPane";
@@ -492,7 +494,10 @@ function SignedOutIntro() {
         </SignInButton>
         <p className={styles.limit}>
           Your documents are visible only to your account, and you can delete
-          all of them at any time. Nothing is shared with anyone else.
+          all of them at any time. Nothing is shared with anyone else.{" "}
+          <Link href="/privacy" className={styles.privacyLink}>
+            What happens to your documents
+          </Link>
         </p>
       </div>
     </div>

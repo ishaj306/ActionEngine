@@ -25,6 +25,7 @@ from app.api.auth import Principal, current_user, settings
 from app.api.export import calendar_for, enquiry_for
 from app.api.limits import requests as request_limit
 from app.api.limits import uploads as upload_limit
+from app.api.observability import configure_logging, spend
 from app.api.schemas import (
     AnalysisOut,
     ComparisonOut,
@@ -80,6 +81,8 @@ store: DocumentStore = build_store()
 #: it did before this existed.
 extractor = build_extractor()
 
+configure_logging(json_output=os.getenv("LOG_FORMAT", "json") == "json")
+
 app = FastAPI(
     title="Document → Action Engine",
     version="0.1.0",
@@ -121,6 +124,19 @@ def health() -> dict[str, str]:
         ),
         "extraction": "hybrid" if extractor else "rules",
     }
+
+
+@app.get("/v1/usage")
+def usage(caller: Principal = Depends(current_user)) -> dict[str, float | int]:
+    """Model spend for this process.
+
+    Per-process and reset on restart -- a signal, not an accounting system.
+    Watch `cache_hit_rate`: the system prompt and schema are identical on every
+    request, so a rate stuck near zero means something volatile has leaked into
+    the cached prefix and every call is paying full price for it.
+    """
+    request_limit.check(caller.user_id)
+    return spend.snapshot()
 
 
 @app.post("/v1/documents", response_model=AnalysisOut, status_code=201)

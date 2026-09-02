@@ -318,6 +318,35 @@ someone spends the money to fill in the other.
 
 ---
 
+## Running it in anger
+
+```bash
+docker compose up --build
+```
+
+Brings up the API against a real Postgres. Worth doing before a deploy for one
+reason: the suite proves the store works against SQLite, which is the same
+SQLAlchemy code path but not the same database, and this is where a
+Postgres-specific difference surfaces while it is still cheap to find.
+
+The container runs as a non-root user and ships Tesseract, so scans are read
+rather than refused.
+
+**Logging is JSON, and carries identifiers, counts and timings only — never
+document text.** Not an extracted deadline, not a requirement, not a sentence.
+A log line is the easiest place in a system for content to reach an aggregator
+or an error tracker nobody audited, so the rule is absolute rather than
+case-by-case. `GET /v1/usage` reports model spend for the process; watch
+`cache_hit_rate`, because a rate stuck near zero means something volatile has
+leaked into the cached prefix and every call is paying full price for it.
+
+`/privacy` says all of this to the reader in their own terms, and is excluded
+from the auth middleware entirely — the one page someone must be able to open
+*before* deciding to trust this system should not depend on a third party being
+reachable.
+
+---
+
 ## Storage
 
 `DATABASE_URL` chooses: unset gives an in-process map, a URL gives Postgres.

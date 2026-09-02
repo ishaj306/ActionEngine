@@ -1,0 +1,95 @@
+/* Reading page, not an interface. One narrow column, generous leading, and the
+   same tokens as everything else so it does not read as a bolted-on legal
+   annexe. */
+
+.page {
+  max-width: 62ch;
+  margin: 0 auto;
+  padding: clamp(2rem, 6vw, 4.5rem) clamp(1.25rem, 4vw, 2rem) 6rem;
+}
+
+.back {
+  margin: 0 0 2.5rem;
+  font-size: 0.85rem;
+}
+
+.back a {
+  color: var(--ink-secondary);
+  text-decoration: none;
+}
+
+.back a:hover {
+  color: var(--ink);
+}
+
+.title {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-doc), Georgia, serif;
+  font-size: clamp(1.75rem, 4vw, 2.4rem);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  color: var(--ink);
+}
+
+.lede {
+  margin: 0 0 3rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: var(--ink-secondary);
+}
+
+.section {
+  margin-bottom: 2.75rem;
+}
+
+.section h2 {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+.section p {
+  margin: 0 0 0.9rem;
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.section p:last-child {
+  margin-bottom: 0;
+}
+
+/* The commentary on a decision, set apart from the decision itself. */
+.aside {
+  padding-left: 1rem;
+  border-left: 2px solid var(--line);
+  color: var(--ink-secondary) !important;
+  font-size: 0.94rem;
+}
+
+.plain {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.plain li {
+  line-height: 1.65;
+  color: var(--ink);
+}
+
+.footnote {
+  margin: 3.5rem 0 0;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--ink-secondary);
+}

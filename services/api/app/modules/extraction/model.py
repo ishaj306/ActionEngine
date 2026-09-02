@@ -37,6 +37,8 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
+from app.api.observability import spend
+
 logger = logging.getLogger("action_engine.model")
 
 __all__ = [
@@ -237,6 +239,12 @@ class AnthropicExtractor:
             output_format=ModelExtraction,
             **({"output_config": output_config} if output_config else {}),
         )
+        # Cost is the only number here that turns into money, and the only one
+        # nobody notices until the bill arrives.
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            spend.record(usage)
+
         parsed = response.parsed_output
         if parsed is None:
             logger.warning("model returned no parseable output")

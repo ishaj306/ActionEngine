@@ -1,0 +1,47 @@
+# Local stack: the API against a real Postgres rather than SQLite.
+#
+# Worth running before a deploy for one reason. The test suite proves the store
+# works against SQLite, which is the same SQLAlchemy code path but not the same
+# database; this is where a Postgres-specific difference shows up while it is
+# still cheap to find.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: engine
+      POSTGRES_PASSWORD: engine
+      POSTGRES_DB: action
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine -d action"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./services/api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://engine:engine@db:5432/action
+      ALLOWED_ORIGINS: http://localhost:3000
+
+      # Local only. The deployed service must set CLERK_ISSUER instead and
+      # leave this unset -- it serves every request as one user with no token
+      # checked at all, and says so in the log on every request.
+      AUTH_DEV_USER: local-dev
+
+      # The model arm stays off unless you opt in and supply a key.
+      EXTRACTION_MODE: ${EXTRACTION_MODE:-rules}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

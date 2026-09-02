@@ -490,3 +490,18 @@
   min-width: 2rem;
   min-height: 2rem;
 }
+
+/* The privacy link sits inside the reassurance paragraph rather than in a
+   footer, because that is the sentence where the reader is actually deciding
+   whether to hand over a document. */
+.privacyLink {
+  color: var(--ink-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--line-strong);
+}
+
+.privacyLink:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
