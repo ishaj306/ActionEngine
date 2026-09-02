@@ -11,9 +11,9 @@ from datetime import date
 
 import pytest
 
+from app.comparison.changes import ChangeKind, Severity, compare
+from app.comparison.crossdoc import ConflictKind, review
 from app.modules.ingestion.document import from_text
-from app.modules.reasoning.changes import ChangeKind, Severity, compare
-from app.modules.reasoning.crossdoc import ConflictKind, review
 from app.pipeline import analyse
 
 TODAY = date(2026, 9, 1)

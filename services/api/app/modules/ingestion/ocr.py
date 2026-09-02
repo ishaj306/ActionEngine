@@ -169,7 +169,9 @@ def _mean_confidence(data: dict[str, list]) -> float:
     """
     scores = [
         float(value)
-        for value, word in zip(data.get("conf", []), data.get("text", []))
+        # strict=False deliberately: if Tesseract returns ragged parallel
+        # lists, scoring the overlap is better than failing the whole read.
+        for value, word in zip(data.get("conf", []), data.get("text", []), strict=False)
         if word.strip() and float(value) >= 0
     ]
     if not scores:

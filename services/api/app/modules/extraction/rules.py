@@ -462,9 +462,10 @@ def _is_resolved_nearby(text: str, match: re.Match[str], pattern: re.Pattern[str
         return True
     if re.search(r"\(\s*[^)]{4,}\)", window[:40]):
         return True
-    if pattern.pattern.startswith(r"\b(?:nominal") and re.search(r"(?:rs\.?|inr|₹)\s*\d", window, re.I):
-        return True
-    return False
+    return bool(
+        pattern.pattern.startswith(r"\b(?:nominal")
+        and re.search(r"(?:rs\.?|inr|₹)\s*\d", window, re.I)
+    )
 
 
 def _ends_on_abbreviation(text: str, end: int) -> bool:

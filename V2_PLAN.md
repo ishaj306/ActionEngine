@@ -34,10 +34,40 @@ you in three months — cannot run it. Nothing else matters until this is true.
 | `.env.example` | Every variable the app reads, with a comment. Currently `ALLOWED_ORIGINS` only; grows each phase |
 | `.github/workflows/ci.yml` | `pytest` + `ruff check` + `mypy` + `tsc --noEmit` + `next build` on push |
 | Delete dead code | `Claim.demote()` stays (Phase 1 uses it). Remove `with_effort()` and the `_ = field` no-op in `planner.py:365` |
-| Fix the layering violation | `modules/reasoning/{changes,crossdoc}.py` import `app.pipeline`. Move the `Analysis` type into `domain/` so reasoning stops importing the composer above it |
+| Fix the layering violation | `modules/reasoning/{changes,crossdoc}.py` import `app.pipeline` |
 
 **Exit criterion:** a clean clone runs `pip install -e ".[dev]" && pytest` and
 gets 317 passing, and CI is green on GitHub.
+
+### Done — with one deviation worth recording
+
+The plan above said to fix the layering violation by moving `Analysis` into
+`domain/`. That was wrong, and tracing the imports showed why: `Analysis` holds
+a `Plan`, a `Requirement`, an `Assessment` and a `SourceKind`, all from
+`modules/`. Moving it down would have made the bottom layer depend on the middle
+one — a worse inversion than the one being fixed.
+
+The actual problem was that `changes.py` and `crossdoc.py` are not document
+modules at all. Their input is two *finished analyses*, so they belong above
+`pipeline.py`. They moved to `app/comparison/` and the direction of every import
+is now downward.
+
+Two other things surfaced only because this phase forced them into the open:
+
+- **`pip install -e .` failed outright.** `readme = "../../README.md"` points
+  outside the package root and setuptools refuses to read it. The manifest was
+  written, looked right, and did not work — which is the whole argument for
+  making CI install from it rather than assuming.
+- **`mypy` runs under `python_version = "3.12"` while the project floor is
+  3.11.** numpy ships 3.12-syntax stubs and is reachable through pytesseract, so
+  a 3.11 setting aborts the run before checking anything. The 3.11 claim is
+  verified by the CI matrix running the suite on 3.11 instead.
+
+Lint findings were triaged rather than bulk-fixed or bulk-suppressed. Four rules
+are ignored in `pyproject.toml`, each with its reason inline; the most
+interesting is `UP042` (`str, Enum` → `StrEnum`), which is a behaviour change
+disguised as a style fix — `StrEnum.__str__` returns the bare value, and the
+calendar export has a test pinning the current behaviour.
 
 ---
 

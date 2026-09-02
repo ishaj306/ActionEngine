@@ -7,6 +7,8 @@ here spend most of their attention on when that must *not* happen.
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import pytest
 
 from app.modules.reasoning.relevance import (
@@ -81,7 +83,7 @@ class TestCriterionExtraction:
                 for item in criteria
                 if item.attribute is attribute
             ]
-            for left, right in zip(spans, spans[1:]):
+            for left, right in pairwise(spans):
                 assert left[1] <= right[0]
 
     def test_a_final_year_restriction_is_kept_but_not_evaluated(self):

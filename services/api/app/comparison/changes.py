@@ -27,10 +27,6 @@ from enum import Enum
 
 from app.domain.claims import ClaimClass
 from app.modules.action_engine.planner import ScheduledAction
-
-# This module takes whole analyses rather than raw text, so unlike every other
-# module here it depends on the composer above it. That is what a cross-version
-# reasoner is: its input is two finished readings, not a document.
 from app.pipeline import Analysis
 
 __all__ = [
@@ -364,7 +360,7 @@ def _condition_changes(previous: Analysis, current: Analysis):
         (item.criterion.attribute, item.criterion.requirement) for item in current.conditions
     }
 
-    for attribute, requirement in sorted(now - was, key=lambda pair: pair[1]):
+    for _attribute, requirement in sorted(now - was, key=lambda pair: pair[1]):
         yield Change(
             kind=ChangeKind.CONDITION_ADDED,
             severity=Severity.CRITICAL,
@@ -373,7 +369,7 @@ def _condition_changes(previous: Analysis, current: Analysis):
             after=requirement,
         )
 
-    for attribute, requirement in sorted(was - now, key=lambda pair: pair[1]):
+    for _attribute, requirement in sorted(was - now, key=lambda pair: pair[1]):
         yield Change(
             kind=ChangeKind.CONDITION_REMOVED,
             severity=Severity.NOTABLE,

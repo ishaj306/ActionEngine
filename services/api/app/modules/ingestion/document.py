@@ -257,11 +257,11 @@ def _parse_pdf(data: bytes, engine: OcrEngine) -> ParsedDocument:
 
     try:
         reader = PdfReader(BytesIO(data))
-        if reader.is_encrypted:
-            # An empty password covers PDFs encrypted only to set permissions,
-            # which is common for official notices.
-            if reader.decrypt("") == 0:
-                raise UnsupportedDocument("PDF is password protected")
+        # An empty password covers PDFs encrypted only to set permissions,
+        # which is common for official notices. `and` short-circuits, so
+        # decrypt() is still only attempted on an encrypted file.
+        if reader.is_encrypted and reader.decrypt("") == 0:
+            raise UnsupportedDocument("PDF is password protected")
         raw_pages = [page.extract_text() or "" for page in reader.pages]
     except UnsupportedDocument:
         raise

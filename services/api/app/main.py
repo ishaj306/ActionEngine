@@ -12,10 +12,9 @@ from __future__ import annotations
 import logging
 import os
 from collections import OrderedDict
-from datetime import date, datetime, timezone
-from threading import Lock
-
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from threading import Lock
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,9 +30,9 @@ from app.api.schemas import (
     PortfolioOut,
     PortfolioRequest,
 )
+from app.comparison.changes import compare
+from app.comparison.crossdoc import review
 from app.modules.ingestion.document import ParsedDocument, UnsupportedDocument, parse
-from app.modules.reasoning.changes import compare
-from app.modules.reasoning.crossdoc import review
 from app.modules.reasoning.relevance import Profile
 from app.pipeline import Analysis, analyse
 
@@ -133,7 +132,7 @@ async def _unsupported(_request, exc: UnsupportedDocument) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "time": datetime.now(UTC).isoformat()}
 
 
 @app.post("/v1/documents", response_model=AnalysisOut, status_code=201)

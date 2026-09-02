@@ -12,12 +12,12 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
+from app.comparison.changes import Change, Comparison
+from app.comparison.crossdoc import Conflict, Portfolio, ScheduledItem
 from app.domain.claims import Claim, ClaimClass, InformationGap
 from app.domain.span import EvidenceSpan
 from app.modules.action_engine.planner import ScheduledAction
 from app.modules.extraction.requirements import Requirement
-from app.modules.reasoning.changes import Change, Comparison
-from app.modules.reasoning.crossdoc import Conflict, Portfolio, ScheduledItem
 from app.modules.reasoning.relevance import Profile
 from app.pipeline import Analysis, Condition
 

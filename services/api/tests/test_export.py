@@ -8,7 +8,7 @@ not the deadline.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,7 +28,7 @@ Candidates should obtain the income certificate from the Tehsildar's office.
 A nominal fee is payable at the time of submission.
 """
 
-STAMP = datetime(2026, 9, 1, tzinfo=timezone.utc)
+STAMP = datetime(2026, 9, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -117,7 +117,7 @@ class TestCalendarContent:
         ends = _values(ics, "DTEND;VALUE=DATE:")
 
         assert len(starts) == len(ends)
-        for start, end in zip(starts, ends):
+        for start, end in zip(starts, ends, strict=True):
             assert int(end) > int(start)
 
     def test_the_stated_deadline_gets_its_own_entry(self, ics):

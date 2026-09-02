@@ -361,7 +361,8 @@ class TestCrossDocument:
 
 def test_store_evicts_the_oldest_beyond_capacity(client):
     """Memory stays bounded no matter how many documents are analysed."""
-    from app.main import Store, store as live
+    from app.main import Store
+    from app.main import store as live
 
     ids = [
         client.post(

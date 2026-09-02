@@ -15,7 +15,7 @@ slack that can go negative.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum
 
@@ -368,11 +368,6 @@ def _slack_key(item: ScheduledAction) -> tuple[int, int]:
     return (0, item.slack_days)
 
 
-def with_effort(action: Action, days: int) -> Action:
-    """Convenience for tests and for user-supplied effort overrides."""
-    return replace(action, effort_days=days)
-
-
 __all__ = [
     "Action",
     "ActionVerb",
@@ -380,7 +375,4 @@ __all__ = [
     "Priority",
     "ScheduledAction",
     "build_plan",
-    "with_effort",
 ]
-
-_ = field  # re-exported dataclass helper kept for downstream modules

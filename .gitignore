@@ -37,3 +37,6 @@ Thumbs.db
 # Strategy document — kept locally, published separately rather than shipped
 # with the source.
 strategy.html
+
+# Editable install metadata
+*.egg-info/

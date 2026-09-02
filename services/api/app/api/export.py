@@ -18,7 +18,7 @@ receives means the calendar can never disagree with the screen.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from app.api.schemas import ActionOut, AnalysisOut
 
@@ -43,7 +43,7 @@ def calendar_for(analysis: AnalysisOut, *, now: datetime | None = None) -> str:
     by guessing, and guessing a date into somebody's calendar is worse than
     leaving them to schedule it themselves.
     """
-    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")
+    stamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
 
     lines = [
         "BEGIN:VCALENDAR",

@@ -1,0 +1,130 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "document-action-engine"
+version = "0.1.0"
+description = "Turns notices into evidence-backed, dependency-ordered action plans."
+requires-python = ">=3.11"
+
+# No `readme` key. The repository README sits two directories up and setuptools
+# refuses to read anything outside the package root, which fails the build
+# rather than degrading.
+
+# Lower bounds are the versions the code actually relies on; upper bounds stop
+# a major release from silently breaking a clone months from now. Pydantic v2 is
+# a hard floor -- the epistemic invariant is enforced in `model_post_init`,
+# which v1 does not have.
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.30,<1.0",
+    "pydantic>=2.7,<3.0",
+    "python-multipart>=0.0.9,<1.0",
+    "pypdf>=4.2,<7.0",
+]
+
+[project.optional-dependencies]
+# OCR is optional on purpose. The engine reports honestly that it cannot read a
+# scan rather than failing to import, so a clone without Tesseract still runs
+# every test and every text path.
+ocr = [
+    "pytesseract>=0.3.10,<1.0",
+    "pillow>=10.0,<14.0",
+]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `app` is imported by absolute path from the tests; without this, pytest only
+# finds it when invoked from exactly the right directory.
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+]
+
+[tool.ruff]
+line-length = 92
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "RUF",
+]
+ignore = [
+    # Long lines are almost all prose in docstrings, where rewrapping to fit a
+    # limit reads worse than the overflow.
+    "E501",
+
+    # `class X(str, Enum)` -> `class X(StrEnum)`. Refused because it is a
+    # behaviour change wearing a style fix's clothes: StrEnum.__str__ returns
+    # the bare value, while (str, Enum).__str__ returns "ClassName.MEMBER".
+    # The calendar export depends on that difference and has a test pinning it
+    # (test_the_confidence_reads_as_a_word_not_a_python_enum), so a silent
+    # switch here would change what lands in a user's calendar.
+    "UP042",
+
+    # Ambiguous unicode. Every instance is deliberate typography -- en and em
+    # dashes, curly quotes, the rupee sign -- in text a person reads.
+    "RUF001",
+
+    # `"""a b c""".split()` for word lists. The lexicons in extraction/ and
+    # reasoning/ hold dozens of terms each; as quoted list literals they are
+    # markedly harder to scan and to extend.
+    "SIM905",
+
+    # `file: UploadFile = File(...)`. Calling in a default argument is exactly
+    # how FastAPI declares dependencies; the rule is right about Python in
+    # general and wrong about this framework.
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests name what they assert, at length, on purpose.
+"tests/*" = ["E501"]
+
+[tool.mypy]
+files = ["app"]
+
+# Deliberately 3.12 while `requires-python` is 3.11, and the gap is not an
+# oversight. mypy parses the stubs of everything reachable from our imports
+# under this setting, and numpy -- pulled in transitively by pytesseract --
+# ships stubs using 3.12 syntax, which abort the whole run under 3.11. Since
+# our code uses nothing newer than 3.11, the only thing this loses is mypy
+# catching a 3.12-only feature we never use. The 3.11 floor is verified where
+# it actually can be: CI runs the full suite on 3.11.
+python_version = "3.12"
+
+# Not strict yet. Turning on `disallow_untyped_defs` across a codebase this size
+# in one commit produces a wall of noise that gets suppressed rather than fixed;
+# the settings below catch real mistakes today and tighten per-module later.
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+
+# None of these ship usable type information, and none are ours to check. Both
+# the bare name and the wildcard are listed because `foo.*` matches submodules
+# of foo but not foo itself.
+[[tool.mypy.overrides]]
+module = [
+    "pytesseract", "pytesseract.*",
+    "PIL", "PIL.*",
+    "pypdf", "pypdf.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"

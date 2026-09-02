@@ -186,13 +186,23 @@ contain, which is the case that makes the rest meaningful.
 
 ## Running it
 
+Python 3.11 or newer.
+
 ```bash
-cd services/api && python -m uvicorn app.main:app --port 8000
+cd services/api && pip install -e ".[dev]" && python -m uvicorn app.main:app --port 8000
 ```
 
 ```bash
 cd apps/web && npm install && npm run dev
 ```
+
+The `ocr` extra (`pip install -e ".[dev,ocr]"`) adds the Python side of OCR, and
+the `tesseract` binary has to be on `PATH` for it to do anything. Without either,
+scans are refused with a reason rather than read as empty documents, and every
+test still passes — CI has a job that installs without the extra to keep that
+true.
+
+Copy `.env.example` to `.env` if you need to change the ports or origins.
 
 Open <http://localhost:3000>. Two sample documents are built in; neither is
 chosen to flatter the engine — the first hides a prerequisite that no longer
@@ -226,8 +236,10 @@ services/api/app/
     evidence/       offset-preserving normalization, fuzzy span anchoring
     extraction/     temporal, classification, requirements, rules (baseline)
     action_engine/  dependency graph, backward scheduling, priority
-    reasoning/      eligibility, revision diff, cross-document contradiction
+    reasoning/      eligibility conditions, checked against a declared profile
   pipeline.py       composes the stages into one Analysis
+  comparison/       revision diff and cross-document contradiction — these read
+                    finished analyses, so they sit above the pipeline, not in it
   api/              wire format, .ics and email export; the serialization invariant
 
 apps/web/
