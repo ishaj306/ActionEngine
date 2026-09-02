@@ -5,6 +5,11 @@
   ],
   "deadlines": [
     {
+      "date": "2026-09-01",
+      "quote": "1 September 2026",
+      "is_deadline": false
+    },
+    {
       "date": "2026-09-11",
       "quote": "within 10 days",
       "is_deadline": true
@@ -26,5 +31,5 @@
   "requirements": [],
   "conditions": [],
   "gaps": [],
-  "notes": "The period is relative to the circular's own date, not to the day the file is uploaded. v1 anchors to today, which is wrong whenever the document is not read the day it is issued."
+  "notes": "The period is relative to the circular's own date, not to the day the file is uploaded. v1 anchors to today, which is wrong whenever the document is not read the day it is issued. The circular's own date is a date the document states, so it is labelled -- as a plain date, not a cutoff."
 }

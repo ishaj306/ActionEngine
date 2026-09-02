@@ -71,6 +71,11 @@ class ActionOut(BaseModel):
     depth: int
     requires: list[str]
     blocked_by: list[str]
+    #: The restriction that governs this step, in the document's own words.
+    #: Null means it applies to every reader.
+    conditional_on: str | None
+    #: True when the document offers this rather than requiring it.
+    optional: bool
     deadline: date | None = Field(description="Deadline stated for this action itself")
     effective_deadline: date | None = Field(
         description="Deadline after inheriting constraints from dependent actions"
@@ -92,6 +97,8 @@ class ActionOut(BaseModel):
             depth=item.depth,
             requires=list(item.action.requires),
             blocked_by=list(item.blocked_by),
+            conditional_on=item.action.conditional_on,
+            optional=item.action.optional,
             deadline=item.action.deadline,
             effective_deadline=item.effective_deadline,
             latest_start=item.latest_start,

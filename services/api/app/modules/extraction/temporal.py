@@ -152,6 +152,39 @@ def extract_temporal(
     return _drop_overlaps(found)
 
 
+#: How a document states its own date. Only the opening is scanned, because a
+#: date this far in is the document's own; one further down is content.
+_ISSUE_DATE = re.compile(
+    r"\b(?:dated|date(?:d)?\s*:|issued\s+on|circular\s+dated|notice\s+dated)\s*"
+    r"(?P<date>\d{1,2}[\s./-][A-Za-z]{3,9}[\s./-]\d{2,4}|"
+    r"[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|"
+    r"\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})",
+    re.I,
+)
+
+#: Characters from the top of the document searched for its own date.
+_ISSUE_WINDOW = 400
+
+
+def issue_date(text: str, *, fallback: date) -> date:
+    """The date the document says it was written, if it says so.
+
+    "Registrations must be completed within 10 days of the date of this
+    circular" resolves against the circular's date, not against the day someone
+    happens to upload it. Anchoring to the reading date made every relative
+    period silently wrong for any document not read the day it was issued --
+    which is almost all of them, and wrong in the dangerous direction, because
+    the computed deadline is later than the real one.
+    """
+    match = _ISSUE_DATE.search(text[:_ISSUE_WINDOW])
+    if not match:
+        return fallback
+    for candidate in extract_temporal(match.group("date"), reference=fallback):
+        if candidate.resolved and candidate.kind is TemporalKind.ABSOLUTE:
+            return candidate.resolved
+    return fallback
+
+
 def _scan(text: str, reference: date):
     yield from _scan_windows(text, reference)
     yield from _scan_named(text, reference, _DAY_MONTH, day_first=True)

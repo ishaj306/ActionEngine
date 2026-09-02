@@ -39,7 +39,7 @@ _DOCUMENT_TERMS = frozenset(
     photograph photographs photo photos affidavit undertaking declaration
     form proforma letter offer noc receipt challan proof statement
     testimonial reference bonafide migration transfer character
-    report application synopsis thesis dissertation portfolio
+    report application synopsis thesis dissertation portfolio sample
     """.split()
 )
 
@@ -58,7 +58,17 @@ _CONDITION_PATTERNS = (
                r"below|above|under|over|upto|up\s+to|exceeding)\b", re.I),
     re.compile(r"\d+\s*%|\bpercent\b|\bpercentage\s+of\b", re.I),
     re.compile(r"\b(?:eligible|eligibility|qualify|qualifying|criteria|criterion)\b", re.I),
-    re.compile(r"\b(?:aged?|years?\s+of\s+age|domicile|resident\s+of|belonging\s+to)\b", re.I),
+)
+
+#: Words describing who the reader is. Deliberately weaker than the patterns
+#: above, because they also appear inside the *names* of documents: a domicile
+#: certificate is a paper to fetch, not a criterion to meet, and filing it under
+#: "conditions to meet" sent the reader looking in the wrong section entirely.
+_DEMOGRAPHIC_PATTERNS = (
+    re.compile(
+        r"\b(?:aged?|years?\s+of\s+age|domicile[ds]?|resident\s+of|belonging\s+to)\b",
+        re.I,
+    ),
 )
 
 #: "bank account details" is information, not a document, even though "account"
@@ -133,6 +143,9 @@ def classify_requirement(phrase: str) -> RequirementKind:
     tokens = set(_TOKEN.findall(text.lower()))
     if tokens & _DOCUMENT_TERMS:
         return RequirementKind.DOCUMENT
+    # Checked after documents, not before: "domicile certificate" names a paper.
+    if any(pattern.search(text) for pattern in _DEMOGRAPHIC_PATTERNS):
+        return RequirementKind.CONDITION
     if tokens & _INFORMATION_TERMS:
         return RequirementKind.INFORMATION
     return RequirementKind.UNCLASSIFIED

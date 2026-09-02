@@ -181,8 +181,12 @@ _ORDINAL: dict[str, int] = {
     "fifth": 5, "5th": 5,
 }
 
+#: "second year and above" is a floor, not an equality. Read as equality it
+#: excluded every third- and fourth-year student the notice was written for --
+#: the most damaging kind of mistake this module can make.
 _YEAR = re.compile(
-    r"\b(first|second|third|fourth|fifth|final|1st|2nd|3rd|4th|5th)[\s-]+year\b",
+    r"\b(first|second|third|fourth|fifth|final|1st|2nd|3rd|4th|5th)[\s-]+year"
+    r"(?P<floor>\s+(?:and|or)\s+(?:above|higher|later)|\s+onwards?)?\b",
     re.I,
 )
 
@@ -308,12 +312,17 @@ def _year_criteria(text: str):
     for match in _YEAR.finditer(text):
         word = match.group(1).lower()
         number = _ORDINAL.get(word)
+        floor = bool(match.group("floor"))
         yield Criterion(
             attribute=Attribute.YEAR,
-            comparator=Comparator.EQUALS if number else Comparator.NOT_COMPARABLE,
+            comparator=(
+                (Comparator.AT_LEAST if floor else Comparator.EQUALS)
+                if number
+                else Comparator.NOT_COMPARABLE
+            ),
             value=float(number) if number else None,
             requirement=(
-                f"{match.group(0).strip()} students"
+                (f"year {number} or later" if floor else f"{match.group(0).strip()} students")
                 if number
                 else "final-year students"
             ),

@@ -14,7 +14,7 @@ rule matches carry their own spans by construction.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from app.modules.action_engine.planner import ActionVerb
 from app.modules.extraction.requirements import names_an_artefact
@@ -32,7 +32,7 @@ _VERB_LEXICON: dict[ActionVerb, frozenset[str]] = {
     # belongs to the stage that hands something over.
     ActionVerb.SUBMIT: frozenset(
         "submit upload send deposit pay forward return apply furnish register"
-        " enrol enroll remit".split()
+        " enrol enroll remit include".split()
     ),
     ActionVerb.ATTEND: frozenset(
         "attend appear report participate join present".split()
@@ -101,10 +101,41 @@ _VERB_ALT = "|".join(sorted(_VERB_OF, key=len, reverse=True))
 #: Obligation language, strongest first. The strength maps onto confidence:
 #: "must submit" is an instruction, "may wish to submit" is not.
 _OBLIGATION = (
-    (0.94, re.compile(r"\b(?:must|shall|are\s+required\s+to|is\s+required\s+to|has\s+to|have\s+to)\b", re.I)),
-    (0.86, re.compile(r"\b(?:should|are\s+to|is\s+to|needs?\s+to|are\s+advised\s+to)\b", re.I)),
+    (0.94, re.compile(
+        r"\b(?:must|shall|(?:are|is|was|were)\s+required\s+to|has\s+to|have\s+to|"
+        r"(?:are|is)\s+obliged\s+to)\b", re.I)),
+    (0.86, re.compile(
+        r"\b(?:should|are\s+to|is\s+to|needs?\s+to|are\s+advised\s+to|"
+        r"(?:are|is)\s+expected\s+to|expects?\s+that|(?:are|is)\s+directed\s+to)\b", re.I)),
     (0.70, re.compile(r"\b(?:kindly|please|are\s+requested\s+to)\b", re.I)),
-    (0.55, re.compile(r"\b(?:may|can|are\s+encouraged\s+to)\b", re.I)),
+    (0.55, re.compile(r"\b(?:may|can|(?:are|is)\s+encouraged(?:\s*,[^,]*,)?\s+to|"
+                      r"(?:are|is)\s+welcome\s+to)\b", re.I)),
+)
+
+#: Language marking an obligation as one the reader can decline. Checked
+#: independently of the modal tier, because "encouraged, but not required, to
+#: include a writing sample" is emphatic *and* optional at the same time.
+_OPTIONAL_MARKER = re.compile(
+    r"\b(?:optional(?:ly)?|not\s+(?:required|mandatory|compulsory)|"
+    r"if\s+(?:you\s+)?(?:wish|desire|prefer)|at\s+(?:your|the\s+applicant's)\s+discretion|"
+    r"encouraged\s*,?\s*but\s+not|voluntar(?:y|ily))\b",
+    re.I,
+)
+
+#: A leading clause that restricts who the instruction applies to. Captured so
+#: the plan can say "only if ..." instead of presenting it to everyone.
+_CONDITIONAL_CLAUSE = re.compile(
+    r"^\s*(?P<marker>if|where|in\s+case|in\s+the\s+event|should)\b(?P<clause>[^,]{4,90}),",
+    re.I,
+)
+
+#: A qualifier attached to the subject rather than to the sentence:
+#: "Applicants from outside the state must ...". Same effect on the reader.
+_CONDITIONAL_SUBJECT = re.compile(
+    r"\b(?:applicants?|candidates?|students?|employees?)\s+"
+    r"(?P<clause>(?:from|of|in|with|belonging\s+to|holding|residing)\s+[^,]{4,60}?)\s+"
+    r"(?:must|shall|should|are|is|have|has)\b",
+    re.I,
 )
 
 #: Imperative openings — a notice often just says "Submit the form by …".
@@ -153,6 +184,17 @@ _VAGUE_REFERENTS: tuple[tuple[re.Pattern[str], str, str], ...] = (
         "When will this be announced?",
         "A date is promised but not given.",
     ),
+    (
+        re.compile(r"\b(?:before|by|within)\s+the\s+(?:last|due|final|closing)\s+date\b", re.I),
+        "What is the last date?",
+        "The document sets a deadline and then never states what it is.",
+    ),
+    (
+        re.compile(r"\b(?:refer\s+to|see|as\s+per)\s+the\s+(?:relevant|applicable|"
+                   r"concerned|prescribed)\s+(?:rules|guidelines|norms|circular|notification)\b", re.I),
+        "Which rules apply?",
+        "The document defers to rules it does not name or reproduce.",
+    ),
 )
 
 #: Sentence boundary that does not split on common abbreviations or initials.
@@ -177,12 +219,29 @@ _MAX_SUBJECT_CHARS = 48
 
 #: Matches everything up to and including the obligation marker, capturing the
 #: subject that precedes it.
+#: Must recognise every marker the tier list above recognises. When the two
+#: drifted apart, "the council, having reviewed ... now expects that every
+#: applicant furnish a certificate" found no prefix, so the verb search ran over
+#: the whole sentence and picked "reviewed" -- a description of the council's
+#: past, reported to the reader as their next step.
 _OBLIGATION_PREFIX = re.compile(
-    r"^(?P<subject>.*?)\b(?:must|shall|should|needs?\s+to|are\s+required\s+to|"
-    r"is\s+required\s+to|have\s+to|has\s+to|are\s+advised\s+to|"
-    r"are\s+requested\s+to|kindly|please)\s+",
-    re.I,
+    r"^(?P<subject>.*?)\b(?:must(?:\s+(?:also|additionally))?|shall|should|needs?\s+to|"
+    r"(?:are|is|was|were)\s+required\s+to|have\s+to|has\s+to|are\s+advised\s+to|"
+    r"(?:are|is)\s+expected\s+to|expects?\s+that|(?:are|is)\s+directed\s+to|"
+    r"(?:are|is)\s+obliged\s+to|(?:are|is)\s+encouraged(?:\s*,[^,]*,)?\s+to|"
+    r"(?:are|is)\s+welcome\s+to|are\s+requested\s+to|kindly|please)\s+",
+    # DOTALL because notices are hard-wrapped and a long subject routinely runs
+    # across a line. Without it, "The council, having reviewed ... and consulted
+    # the\nheads of department, now expects that every applicant furnish ..."
+    # found no marker, so the verb search ran over the whole sentence and
+    # reported the council's past review as the reader's next step.
+    re.I | re.S,
 )
+
+#: A verb form preceded by a determiner is a noun. "a writing sample" is not an
+#: instruction to write, and "the report" is not an instruction to report, but
+#: both spellings are lexicon entries.
+_NOUN_BEFORE = re.compile(r"(?:\b(?:a|an|the|this|that|each|every|any|no|your|their|its)\s+|\w-)$", re.I)
 
 #: "be completed", "been submitted" -- the passive that follows the modal.
 _PASSIVE_HEAD = re.compile(r"^(?:be|been|being)\s+\w+\s*", re.I)
@@ -210,6 +269,11 @@ class ActionCandidate:
     rationale: str
     #: Requirement phrases found in the same sentence.
     requires: tuple[str, ...] = ()
+    #: The restriction that governs this action, in the document's own words,
+    #: when it applies only to some readers. None means it applies to everyone.
+    conditional_on: str | None = None
+    #: True when the document says the reader may, not must.
+    optional: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,9 +311,7 @@ def extract_actions(text: str) -> list[ActionCandidate]:
     for sentence in split_sentences(text):
         if len(sentence.text) < _MIN_SENTENCE_CHARS:
             continue
-        candidate = _action_from(sentence)
-        if candidate:
-            found.append(candidate)
+        found.extend(_actions_from(sentence))
     return found
 
 
@@ -279,7 +341,18 @@ def extract_gaps(text: str) -> list[GapCandidate]:
                 )
             )
     found.sort(key=lambda gap: gap.char_start)
-    return found
+
+    # A document that says "portal" three times has one unanswered question,
+    # not three. Repeating it makes the panel look padded and trains the reader
+    # to skim exactly the section that most needs reading.
+    seen: set[str] = set()
+    unique: list[GapCandidate] = []
+    for gap in found:
+        if gap.question in seen:
+            continue
+        seen.add(gap.question)
+        unique.append(gap)
+    return unique
 
 
 def _action_from(sentence: Sentence) -> ActionCandidate | None:
@@ -303,7 +376,7 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
     if prefix:
         scope = lowered[prefix.end() :]
 
-    verb_match = re.search(rf"\b({_VERB_ALT})\b", scope)
+    verb_match = _first_verb(scope)
     if not verb_match:
         return None
 
@@ -316,6 +389,13 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
         else "Sentence is phrased as a direct instruction."
     )
 
+    condition = _restriction(sentence.text)
+    optional = bool(_OPTIONAL_MARKER.search(sentence.text)) or obligation_score <= 0.55
+    if condition:
+        rationale += f" Applies only {condition}."
+    if optional:
+        rationale += " The document offers this rather than requiring it."
+
     return ActionCandidate(
         description=_as_instruction(sentence.text, base),
         verb=verb,
@@ -324,7 +404,141 @@ def _action_from(sentence: Sentence) -> ActionCandidate | None:
         confidence=confidence,
         rationale=rationale,
         requires=_requirements_in(sentence.text, verb_end, verb=verb),
+        conditional_on=condition,
+        optional=optional,
     )
+
+
+def _first_verb(scope: str) -> re.Match[str] | None:
+    """The first lexicon verb that is actually being used as a verb.
+
+    Several lexicon entries are also common nouns -- "a writing sample", "the
+    project report", "the present address". Taking the first spelling match
+    turned each of those into an instruction.
+    """
+    for match in re.finditer(rf"\b({_VERB_ALT})\b", scope):
+        if not _NOUN_BEFORE.search(scope[: match.start()]):
+            return match
+    return None
+
+
+def _actions_from(sentence: Sentence) -> list[ActionCandidate]:
+    """Every instruction in one sentence, not merely the first.
+
+    "Obtain the clearance certificate, fill the no-dues form and submit it"
+    is three things to do. Returning only the first left the other two to be
+    scraped out as requirements, which produced a checklist entry reading
+    "Submit it" and hid two real steps from the plan.
+    """
+    head = _action_from(sentence)
+    if head is None:
+        return []
+
+    extra = _coordinated_with(head, sentence)
+    if not extra:
+        return [head]
+
+    # Once the later clauses are their own actions, the head must stop where
+    # they begin. Otherwise its description repeats the whole sentence and its
+    # requirements absorb the objects that now belong to the other steps.
+    boundary = _COORDINATED_VERB.search(sentence.text)
+    if boundary:
+        clause = sentence.text[: boundary.start()].rstrip(" ,;")
+        trimmed = _as_instruction(clause, _head_base(head))
+        if trimmed:
+            head = replace(
+                head,
+                description=trimmed,
+                requires=_requirements_in(
+                    clause, _verb_end_in(clause), verb=head.verb
+                ),
+            )
+    return [head, *extra]
+
+
+def _head_base(head: ActionCandidate) -> str:
+    first = head.description.split(" ", 1)[0].lower()
+    entry = _VERB_OF.get(first)
+    return entry[1] if entry else first
+
+
+def _verb_end_in(clause: str) -> int:
+    match = re.search(rf"\b({_VERB_ALT})\b", clause.lower())
+    return match.end() if match else 0
+
+
+#: A verb introduced by a coordinator, which is what distinguishes a second
+#: instruction from a noun that happens to share a verb's spelling. "the
+#: project report" must not become an ATTEND action just because "report" is
+#: in the lexicon; ", and submit it" must become a SUBMIT one.
+_COORDINATED_VERB = re.compile(rf"(?:,|\band\b|\bor\b)\s+({_VERB_ALT})\b", re.I)
+
+
+def _coordinated_with(head: ActionCandidate, sentence: Sentence) -> list[ActionCandidate]:
+    extra: list[ActionCandidate] = []
+    seen = {head.description.lower()}
+
+    for match in _COORDINATED_VERB.finditer(sentence.text):
+        form = match.group(1).lower()
+        verb, base = _VERB_OF[form]
+
+        # Only coordinate verbs in the same form as the head. Without this,
+        # "upload your resume, a scanned copy of the ID card and the offer
+        # letter" reads "scanned" as a second instruction, because the past
+        # participle of "scan" is also a lexicon entry.
+        if (form == base) != _is_base_form(head):
+            continue
+
+        tail = sentence.text[match.end(1) :]
+        description = _clean_coordinated(base, tail)
+        if not description or description.lower() in seen:
+            continue
+        seen.add(description.lower())
+        extra.append(
+            ActionCandidate(
+                description=description,
+                verb=verb,
+                char_start=sentence.char_start,
+                char_end=sentence.char_end,
+                confidence=round(head.confidence * 0.95, 4),
+                rationale=(
+                    "Coordinated with an earlier instruction in the same "
+                    "sentence, so it carries slightly less weight than the "
+                    "instruction that states the obligation."
+                ),
+                requires=_requirements_in(sentence.text, match.end(1), verb=verb),
+                conditional_on=head.conditional_on,
+                optional=head.optional,
+            )
+        )
+    return extra
+
+
+def _is_base_form(head: ActionCandidate) -> bool:
+    first = head.description.split(" ", 1)[0].lower()
+    entry = _VERB_OF.get(first)
+    return entry is not None and first == entry[1]
+
+
+def _clean_coordinated(base: str, tail: str) -> str | None:
+    rest = _before_trailing_clause(re.split(r"[,;]|\band\b|\bor\b", tail, maxsplit=1)[0])
+    rest = " ".join(rest.split())
+    if not rest:
+        return None
+    phrase = f"{base} {rest}".strip()
+    phrase = _truncate(phrase)
+    return phrase[:1].upper() + phrase[1:]
+
+
+def _restriction(sentence: str) -> str | None:
+    """The wording that limits who an instruction applies to."""
+    leading = _CONDITIONAL_CLAUSE.match(sentence)
+    if leading:
+        return f"{leading.group('marker').lower()} {leading.group('clause').strip()}"
+    subject = _CONDITIONAL_SUBJECT.search(sentence)
+    if subject:
+        return f"for {' '.join(subject.group('clause').split())}"
+    return None
 
 
 #: Objects that refer back rather than naming anything. "Submit it to the
@@ -445,7 +659,7 @@ def _before_trailing_clause(tail: str) -> str:
 def _clean_requirement(fragment: str) -> str | None:
     text = re.sub(r"\b(?:their|his|her|the|a|an|its|your)\b", " ", fragment, flags=re.I)
     text = re.sub(r"[^\w\s./-]", " ", text)
-    text = " ".join(text.split())
+    text = " ".join(text.split()).strip(" .")
     text = _trim_dangling_participle(text)
     if not 3 <= len(text) <= 60:
         return None

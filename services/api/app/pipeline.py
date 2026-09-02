@@ -31,6 +31,7 @@ from app.modules.extraction.temporal import (
     TemporalExpression,
     TemporalKind,
     extract_temporal,
+    issue_date,
 )
 from app.modules.ingestion.document import ParsedDocument, SourceKind
 from app.modules.reasoning.relevance import (
@@ -149,7 +150,11 @@ def analyse(
     started = perf_counter()
     text = document.text
 
-    temporal = extract_temporal(text, reference=today)
+    # Relative periods resolve against the document's own date where it states
+    # one, not against the day it is read. `today` still drives the schedule --
+    # slack is a fact about now, not about the document.
+    issued = issue_date(text, fallback=today)
+    temporal = extract_temporal(text, reference=issued)
     deadlines = tuple(
         _deadline_claim(expression, document)
         for expression in temporal
@@ -306,6 +311,8 @@ def _build_actions(
                 ),
                 deadline=_deadline_for(candidate, temporal),
                 effort_days=_DEFAULT_EFFORT[candidate.verb],
+                conditional_on=candidate.conditional_on,
+                optional=candidate.optional,
                 # Collapsed here as well as in the document-wide list, or the
                 # step reads "Income certificate · Self-attested copy of
                 # previous marksheet · Previous marksheet" while the summary
@@ -355,11 +362,20 @@ def _link_dependencies(actions: list[Action]) -> list[Action]:
                 if producer and producer != action.id:
                     dependencies.add(producer)
 
-        if not dependencies:
-            stage = _VERB_STAGE[action.verb]
-            earlier = [other for other in by_stage if other < stage]
-            if earlier:
-                dependencies.update(by_stage[max(earlier)])
+        # There used to be a fallback here: an action with no matched
+        # prerequisite inherited an edge from the previous verb stage. It was
+        # removed, and its removal is the point.
+        #
+        # A hardcoded verb ordering is not dependency detection. It asserted
+        # that "attend the orientation" depends on "submit the application" in
+        # every document, including the many where the orientation comes first.
+        # Worse, those fabricated edges fed backward deadline propagation, so an
+        # invented ordering produced an invented start date and printed it with
+        # the same confidence as a real one -- the precise failure this engine
+        # exists to prevent, sitting inside its flagship feature.
+        #
+        # An action with no evidence of a prerequisite now shows none, and
+        # inherits no deadline. Saying nothing is the honest output.
 
         linked.append(
             Action(
@@ -371,6 +387,8 @@ def _link_dependencies(actions: list[Action]) -> list[Action]:
                 effort_days=action.effort_days,
                 depends_on=frozenset(dependencies - {action.id}),
                 requires=action.requires,
+                conditional_on=action.conditional_on,
+                optional=action.optional,
             )
         )
     return linked
@@ -420,12 +438,61 @@ def _deadline_claim(
         # an inference no matter how clearly the period itself is stated.
         classification = ClaimClass.INFERENCE
 
-    return Claim[date](
+    claim = Claim[date](
         value=expression.resolved,
         classification=classification,
         confidence=Confidence(score=confidence, rationale=rationale),
         evidence=_span(expression.char_start, expression.char_end, document),
     )
+    return _verified(claim, kind=expression.kind)
+
+
+#: Month names as they appear in notices, indexed by month number.
+_MONTHS = (
+    "", "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
+)
+
+
+def _verified(claim: Claim[date], *, kind: TemporalKind) -> Claim[date]:
+    """Demote a date claim whose cited span does not actually state it.
+
+    The `Claim` invariant guarantees that every FACT carries a span. It does not
+    guarantee the span *supports* the claim -- provenance is not entailment, and
+    a citation that points at the wrong sentence is worse than no citation,
+    because it looks checked.
+
+    Only absolute dates are verifiable this way. A relative period is computed:
+    "within 10 days" resolves to a date its own span does not contain, and
+    demoting it would punish arithmetic for being arithmetic.
+
+    Against the rule arm this check never fires, and saying so is more useful
+    than implying otherwise: a rule's span is the text it matched, so it states
+    its value by construction. The check exists because the model arm's spans
+    will not have that property -- a model asked to cite a date can return a
+    sentence that does not contain one -- and the seam is worth building before
+    the thing that needs it, not after.
+    """
+    if kind is not TemporalKind.ABSOLUTE or claim.evidence is None:
+        return claim
+    if _states(claim.value, claim.evidence.text):
+        return claim
+    return claim.demote(
+        "The sentence cited for this date does not appear to state it, so the "
+        "date is reported as unconfirmed rather than as a fact."
+    )
+
+
+def _states(value: date, text: str) -> bool:
+    """Whether a span plausibly spells out a particular date."""
+    lowered = text.lower()
+    day = str(value.day)
+    has_day = re.search(rf"\b0?{day}\b", lowered) is not None
+    has_month = (
+        _MONTHS[value.month] in lowered
+        or re.search(rf"\b0?{value.month}\b", lowered) is not None
+    )
+    return has_day and has_month
 
 
 def _gap(candidate: rules.GapCandidate, document: ParsedDocument) -> InformationGap:

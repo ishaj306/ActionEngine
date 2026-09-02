@@ -70,6 +70,11 @@ class Action:
     depends_on: frozenset[str] = frozenset()
     #: Requirements this action produces or consumes, for the checklist view.
     requires: tuple[str, ...] = ()
+    #: The restriction that governs this action, in the document's own words,
+    #: when it applies only to some readers. None means it applies to everyone.
+    conditional_on: str | None = None
+    #: True when the document offers this rather than requiring it.
+    optional: bool = False
 
 
 @dataclass(frozen=True, slots=True)

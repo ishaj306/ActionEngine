@@ -23,6 +23,12 @@
       "quote": "may optionally attach a recommendation letter",
       "gist": "attach recommendation letter",
       "optional": true
+    },
+    {
+      "verb": "submit",
+      "quote": "to include a writing sample",
+      "gist": "include a writing sample",
+      "optional": true
     }
   ],
   "requirements": [
@@ -43,5 +49,5 @@
   ],
   "conditions": [],
   "gaps": [],
-  "notes": "Nothing here except the statement of purpose is mandatory. v1 lists the recommendation letter as a hard requirement."
+  "notes": "Nothing here except the statement of purpose is mandatory. v1 lists the recommendation letter as a hard requirement. The writing-sample sentence is a third action, and an optional one; the first pass of labels omitted it."
 }

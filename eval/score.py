@@ -135,8 +135,20 @@ def score_document(gold: GoldDocument, report: Report) -> None:
     _score_modality(gold, analysis, report)
 
 
+#: Gold vocabulary to the label the engine actually emits. Not identity:
+#: `other` surfaces as "Document", and comparing the two strings directly
+#: scored a correct answer as wrong.
+_TYPE_LABEL = {
+    "notice": "notice",
+    "form": "form",
+    "job_description": "job_description",
+    "policy": "policy",
+    "other": "document",
+}
+
+
 def _type_label(kind: str) -> str:
-    return {"job_description": "job_description"}.get(kind, kind)
+    return _TYPE_LABEL[kind]
 
 
 def _score_dates(gold: GoldDocument, report: Report) -> None:
@@ -347,16 +359,66 @@ def _score_gaps(gold: GoldDocument, analysis, report: Report) -> None:
 def _score_modality(gold: GoldDocument, analysis, report: Report) -> None:
     """Conditional and optional obligations.
 
-    v1 has no representation for either, so this scores zero by construction.
-    That is the point: the row exists so the gap is a number in the table rather
-    than a caveat in a README, and so the fix has something to move.
+    An action the reader can decline, or one that applies only to some people,
+    is the most consequential thing to get wrong here: presented as mandatory it
+    sends someone to fetch a document they never needed.
+
+    Scored only over actions the engine actually found, so this row measures
+    whether modality is read correctly rather than re-punishing a recall miss
+    the actions row has already counted.
     """
     tally = report.stages["conditional / optional"]
-    wanted = [item for item in gold.actions if item.conditional or item.optional]
-    tally.false_negative += len(wanted)
-    for want in wanted:
+    predicted = [item.action for item in analysis.plan.scheduled]
+
+    for want in gold.actions:
+        if not (want.conditional or want.optional):
+            continue
+        hit = next(
+            (
+                action for action in predicted
+                if action.claim.evidence
+                and Span(
+                    action.claim.evidence.char_start, action.claim.evidence.char_end
+                ).overlaps(want.span, ratio=_SPAN_RATIO)
+            ),
+            None,
+        )
         kind = "conditional" if want.conditional else "optional"
-        tally.misses.append(f"{gold.name}: {want.gist!r} is {kind}, reported as mandatory")
+        if hit is None:
+            tally.false_negative += 1
+            tally.misses.append(f"{gold.name}: {want.gist!r} ({kind}) -- action not found")
+            continue
+        got_conditional = hit.conditional_on is not None
+        if (want.conditional and got_conditional) or (want.optional and hit.optional):
+            tally.true_positive += 1
+        else:
+            tally.false_negative += 1
+            tally.misses.append(
+                f"{gold.name}: {want.gist!r} is {kind}, reported as mandatory"
+            )
+
+    # An action wrongly marked restricted is its own harm: it tells a reader a
+    # step is not theirs when it is.
+    for action in predicted:
+        if action.conditional_on is None and not action.optional:
+            continue
+        match = next(
+            (
+                want for want in gold.actions
+                if (want.conditional or want.optional)
+                and action.claim.evidence
+                and Span(
+                    action.claim.evidence.char_start, action.claim.evidence.char_end
+                ).overlaps(want.span, ratio=_SPAN_RATIO)
+            ),
+            None,
+        )
+        if match is None:
+            tally.false_positive += 1
+            tally.spurious.append(
+                f"{gold.name}: {action.description!r} marked "
+                f"{action.conditional_on or 'optional'}, but is neither"
+            )
 
 
 def calibration(predictions: list[Prediction]) -> list[tuple[str, int, float, float]]:

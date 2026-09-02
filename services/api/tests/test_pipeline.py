@@ -302,3 +302,78 @@ Candidates should obtain the income certificate from the Tehsildar's office.
 
     assert not result.plan.is_feasible
     assert any(item.priority is Priority.OVERDUE for item in result.plan.scheduled)
+
+
+class TestVerification:
+    """Provenance is not entailment.
+
+    The Claim invariant guarantees a FACT carries a span. It does not guarantee
+    the span supports the claim, and a citation pointing at the wrong sentence
+    is worse than none because it looks checked.
+    """
+
+    def test_a_date_whose_span_states_it_survives(self):
+        from datetime import date as _date
+
+        from app.domain.claims import Claim, ClaimClass, Confidence
+        from app.domain.span import EvidenceSpan
+        from app.modules.extraction.temporal import TemporalKind
+        from app.pipeline import _verified
+
+        claim = Claim[_date](
+            value=_date(2026, 9, 18),
+            classification=ClaimClass.FACT,
+            confidence=Confidence(score=0.97, rationale="Stated outright."),
+            evidence=EvidenceSpan(
+                page=1, char_start=0, char_end=17,
+                text="18 September 2026", match_score=1.0,
+            ),
+        )
+
+        assert _verified(claim, kind=TemporalKind.ABSOLUTE).classification is ClaimClass.FACT
+
+    def test_a_date_its_span_does_not_state_is_demoted(self):
+        from datetime import date as _date
+
+        from app.domain.claims import Claim, ClaimClass, Confidence
+        from app.domain.span import EvidenceSpan
+        from app.modules.extraction.temporal import TemporalKind
+        from app.pipeline import _verified
+
+        claim = Claim[_date](
+            value=_date(2026, 9, 18),
+            classification=ClaimClass.FACT,
+            confidence=Confidence(score=0.97, rationale="Stated outright."),
+            evidence=EvidenceSpan(
+                page=1, char_start=0, char_end=34,
+                text="Applications are now open to all.", match_score=1.0,
+            ),
+        )
+        checked = _verified(claim, kind=TemporalKind.ABSOLUTE)
+
+        assert checked.classification is ClaimClass.UNCERTAIN
+        assert checked.confidence.score < 0.97
+        assert "does not appear to state it" in checked.confidence.rationale
+
+    def test_a_computed_date_is_not_punished_for_being_computed(self):
+        """"within 10 days" resolves to a date its own span cannot contain."""
+        from datetime import date as _date
+
+        from app.domain.claims import Claim, ClaimClass, Confidence
+        from app.domain.span import EvidenceSpan
+        from app.modules.extraction.temporal import TemporalKind
+        from app.pipeline import _verified
+
+        claim = Claim[_date](
+            value=_date(2026, 9, 11),
+            classification=ClaimClass.INFERENCE,
+            confidence=Confidence(score=0.7, rationale="Ten days from issue."),
+            evidence=EvidenceSpan(
+                page=1, char_start=0, char_end=14,
+                text="within 10 days", match_score=1.0,
+            ),
+        )
+
+        assert _verified(claim, kind=TemporalKind.RELATIVE).classification is (
+            ClaimClass.INFERENCE
+        )

@@ -184,6 +184,53 @@ contain, which is the case that makes the rest meaningful.
 
 ---
 
+## How well it works
+
+```bash
+python eval/score.py
+```
+
+17 labelled documents. Every quote in the labels is resolved against the source
+and refuses to load if it is absent or ambiguous.
+
+| Stage | Gold | P | R | F1 |
+| --- | ---: | ---: | ---: | ---: |
+| Dates (all) | 17 | 0.94 | 0.94 | 0.94 |
+| Deadlines (cutoffs) | 12 | 1.00 | 1.00 | 1.00 |
+| Actions found | 22 | 1.00 | 1.00 | 1.00 |
+| Action verb correct | 22 | 1.00 | 1.00 | 1.00 |
+| Requirements | 21 | 1.00 | 1.00 | 1.00 |
+| Requirement kind | 21 | 1.00 | 1.00 | 1.00 |
+| Eligibility conditions | 6 | 1.00 | 1.00 | 1.00 |
+| Information gaps | 8 | 1.00 | 1.00 | 1.00 |
+| Conditional / optional | 4 | 1.00 | 1.00 | 1.00 |
+| Document type | 17 | — | — | 0.88 accuracy |
+
+**Read this table as "no known failure remains in this corpus", not as "the
+engine is accurate."** Those are different claims and only the first is
+supported. The corpus is synthetic, it has 17 documents, and the same person
+wrote the labels and the code — which is the standard recipe for a benchmark
+that flatters its system. Four negative controls are a partial defence:
+anything extracted from them is a false positive. Real scanned documents will
+be harder, and the honest next step is to add them and watch these numbers
+fall.
+
+The calibration table is the one that matters and the one currently least
+trustworthy. Claims asserted at 0.95 are right 100% of the time here, which
+says the corpus is too easy rather than that the confidence is well calibrated.
+`0.97` remains a constant chosen by hand, not a measured probability.
+
+Where it started, before any of Phase 1's fixes:
+
+| Stage | Before | After |
+| --- | ---: | ---: |
+| Deadlines | 0.82 | 1.00 |
+| Actions | 0.89 | 1.00 |
+| Requirements | 0.55 | 1.00 |
+| Conditional / optional | 0.00 | 1.00 |
+
+---
+
 ## Running it
 
 Python 3.11 or newer.
@@ -264,9 +311,10 @@ document classification; deadline, requirement, action and gap extraction; the
 four-state epistemic model; per-claim evidence anchoring; dependency-aware
 backward scheduling and priority; eligibility matching against a self-declared
 profile; calendar and email export; server-side completion tracking; revision
-comparison; and cross-document contradiction detection. 317 tests.
+comparison; and cross-document contradiction detection. 337 tests, and a
+17-document benchmark that measures them.
 
-Three limitations worth naming, all deliberate:
+Four limitations worth naming, all deliberate:
 
 - **A deadline attaches to an action only when it appears in that action's own
   sentence.** Linking a date across sentences is exactly the confident guess
@@ -276,11 +324,20 @@ Three limitations worth naming, all deliberate:
 - **No dependency is inferred across documents.** Whether the circular's step
   blocks the notice's step is a question about the world, not the text, so the
   merged timeline orders by date and attributes every step to its source.
+- **An action with no evidence of a prerequisite shows no dependency.** A
+  verb-order fallback used to invent one, and the invented edge fed backward
+  propagation, so a fabricated ordering produced a fabricated start date
+  carrying the same confidence as a real one.
 
-Next, in order: the model extraction arm behind the same `Claim` contract, with
-a verification pass that demotes any claim its cited span does not entail; the
-annotated benchmark and the rules-vs-model-vs-hybrid ablation; then Postgres
-behind the existing `Store` boundary.
+The verification pass exists and is wired: a date claim whose cited span does
+not state it is demoted to `UNCERTAIN`. Against the rule arm it never fires,
+because a rule's span is the text it matched. It is built for the model arm,
+whose spans will not have that property.
+
+Next, in order: authentication and tenant isolation, which the API has none of;
+then the model extraction arm behind the same `Claim` contract, scored against
+this benchmark as a rules-vs-model-vs-hybrid ablation; then Postgres behind the
+existing `Store` boundary.
 
 The design rationale, competitive analysis and full roadmap live in a separate
 strategy document, published rather than checked in.
