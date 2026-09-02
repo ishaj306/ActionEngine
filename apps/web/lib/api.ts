@@ -192,6 +192,39 @@ export interface EnquiryDraft {
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+/**
+ * Supplies the bearer token for a request.
+ *
+ * Passed in rather than imported, because getting a token is a React hook and
+ * this module is plain functions. It also keeps the one place that talks to the
+ * API from having an opinion about which auth provider is in use.
+ */
+export type TokenSource = () => Promise<string | null>;
+
+let tokenSource: TokenSource | null = null;
+
+/**
+ * Register how to obtain a bearer token. Called once, from the provider at the
+ * top of the tree.
+ *
+ * Module-scoped rather than threaded through every call. Getting a token is a
+ * React hook and this module is plain functions, so the alternative is an extra
+ * parameter on all nine requests and on every component that makes one -- and
+ * the failure mode of that is one call site quietly omitting it and sending an
+ * unauthenticated request, which is exactly the mistake worth designing out.
+ */
+export function setTokenSource(source: TokenSource | null): void {
+  tokenSource = source;
+}
+
+async function authorized(extra?: HeadersInit): Promise<HeadersInit> {
+  const token = await tokenSource?.();
+  return {
+    ...(extra ?? {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 /** An error carrying the server's remedy, so the UI never shows a dead end. */
 export class ApiError extends Error {
   readonly remedy: string | undefined;
@@ -208,6 +241,23 @@ async function unwrap(response: Response): Promise<Analysis> {
 
   let detail = `Request failed (${response.status}).`;
   let remedy: string | undefined;
+
+  if (response.status === 401) {
+    throw new ApiError("Your session has expired.", "Sign in again to continue.");
+  }
+  if (response.status === 429) {
+    const wait = response.headers.get("Retry-After");
+    throw new ApiError(
+      "You have reached the hourly limit for this account.",
+      wait ? `Try again in about ${Math.ceil(Number(wait) / 60)} minutes.` : undefined,
+    );
+  }
+  if (response.status === 503) {
+    throw new ApiError(
+      "The analysis service is not accepting requests.",
+      "It has no authentication configured, so it is refusing to serve anyone.",
+    );
+  }
   try {
     const body = (await response.json()) as { detail?: unknown; remedy?: string };
     if (typeof body.detail === "string") detail = body.detail;
@@ -226,12 +276,20 @@ function asNetworkError(cause: unknown): never {
   );
 }
 
-export async function analyseFile(file: File, signal?: AbortSignal): Promise<Analysis> {
+export async function analyseFile(
+  file: File,
+  signal?: AbortSignal,
+): Promise<Analysis> {
   const body = new FormData();
   body.append("file", file);
   try {
     return await unwrap(
-      await fetch(`${BASE}/v1/documents`, { method: "POST", body, signal }),
+      await fetch(`${BASE}/v1/documents`, {
+        method: "POST",
+        headers: await authorized(),
+        body,
+        signal,
+      }),
     );
   } catch (cause) {
     asNetworkError(cause);
@@ -247,7 +305,7 @@ export async function analyseText(
     return await unwrap(
       await fetch(`${BASE}/v1/documents/text`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authorized({ "Content-Type": "application/json" }),
         body: JSON.stringify({ text, filename }),
         signal,
       }),
@@ -286,7 +344,7 @@ export async function updatePlan(
     return await unwrap(
       await fetch(`${BASE}/v1/documents/${documentId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: await authorized({ "Content-Type": "application/json" }),
         body: JSON.stringify(patch),
         signal,
       }),
@@ -297,7 +355,11 @@ export async function updatePlan(
 }
 
 export async function fetchAnalysis(documentId: string): Promise<Analysis> {
-  return unwrap(await fetch(`${BASE}/v1/documents/${documentId}`));
+  return unwrap(
+    await fetch(`${BASE}/v1/documents/${documentId}`, {
+      headers: await authorized(),
+    }),
+  );
 }
 
 export async function fetchChanges(
@@ -305,7 +367,9 @@ export async function fetchChanges(
   since: string,
 ): Promise<Comparison> {
   return unwrapAs<Comparison>(
-    await fetch(`${BASE}/v1/documents/${documentId}/changes?since=${since}`),
+    await fetch(`${BASE}/v1/documents/${documentId}/changes?since=${since}`, {
+      headers: await authorized(),
+    }),
   );
 }
 
@@ -313,7 +377,7 @@ export async function fetchPortfolio(documentIds: string[]): Promise<Portfolio> 
   return unwrapAs<Portfolio>(
     await fetch(`${BASE}/v1/portfolio`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await authorized({ "Content-Type": "application/json" }),
       body: JSON.stringify({ document_ids: documentIds }),
     }),
   );
@@ -321,12 +385,46 @@ export async function fetchPortfolio(documentIds: string[]): Promise<Portfolio> 
 
 export async function fetchEnquiry(documentId: string): Promise<EnquiryDraft> {
   return unwrapAs<EnquiryDraft>(
-    await fetch(`${BASE}/v1/documents/${documentId}/enquiry`),
+    await fetch(`${BASE}/v1/documents/${documentId}/enquiry`, {
+      headers: await authorized(),
+    }),
   );
 }
 
-export function calendarUrl(documentId: string): string {
-  return `${BASE}/v1/documents/${documentId}/calendar.ics`;
+/**
+ * Download the calendar file.
+ *
+ * Fetched with the bearer header and handed to the browser as a blob, rather
+ * than linked to directly. A plain link cannot carry a header, and the obvious
+ * workaround -- putting the token in the query string -- writes a live
+ * credential into server logs, `Referer` headers and browser history, where it
+ * outlives the session that issued it.
+ */
+export async function downloadCalendar(
+  documentId: string,
+  filename: string,
+): Promise<void> {
+  const response = await fetch(`${BASE}/v1/documents/${documentId}/calendar.ics`, {
+    headers: await authorized(),
+  });
+  if (!response.ok) {
+    throw new ApiError(
+      "The calendar file could not be generated.",
+      response.status === 401 ? "Sign in again to continue." : undefined,
+    );
+  }
+
+  const url = URL.createObjectURL(await response.blob());
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filename.replace(/\.[^.]+$/, "") || "plan"}.ics`;
+    link.click();
+  } finally {
+    // Revoked on the next tick: revoking synchronously can race the download
+    // in Safari and produce an empty file.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 
 /** Format an ISO date for display in the viewer's locale. */

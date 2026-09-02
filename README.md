@@ -231,6 +231,34 @@ Where it started, before any of Phase 1's fixes:
 
 ---
 
+## Accounts and isolation
+
+Sign-in is Clerk, restricted to Google in the Clerk dashboard. The API verifies
+each session token against Clerk's published keys and takes the user id from the
+token — never from a header or a request body, because a client-supplied
+identity is not an identity.
+
+**With no issuer configured, every document route returns 503.** That costs a
+little friction locally and buys the guarantee worth having: this cannot be
+deployed unauthenticated by forgetting to set something. `AUTH_DEV_USER` is the
+local escape hatch; it must be set deliberately and logs a warning on every
+request that uses it.
+
+Ownership is enforced inside the store rather than at each call site, so a route
+that forgets to filter cannot be written. Another user's document is a **404,
+not a 403** — a 403 confirms the id exists, which is what a probe is looking
+for. Document ids are random rather than content hashes: a hash is identical for
+everyone who uploads the same public circular, which turns an id into a guess
+anyone can make.
+
+An integration test drives every route as a second user and requires a 404 from
+each. Its failure is a disclosure, not a bug report.
+
+Per-account rate limits are in-process, so two replicas each allow the full
+quota. That is a real limitation and the fix belongs with the persistence work.
+
+---
+
 ## Running it
 
 Python 3.11 or newer.

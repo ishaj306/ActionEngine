@@ -12,7 +12,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, store
+from app.main import app
 
 NOTICE = """NATIONAL MERIT SCHOLARSHIP 2026
 
@@ -26,7 +26,6 @@ Candidates should obtain the income certificate from the Tehsildar's office.
 
 @pytest.fixture
 def client():
-    store._items.clear()
     return TestClient(app)
 
 
@@ -372,12 +371,14 @@ def test_store_evicts_the_oldest_beyond_capacity(client):
         for index in range(3)
     ]
 
+    from tests.conftest import TEST_USER
+
     small = Store(capacity=2)
     for document_id in ids:
-        record = live.get(document_id)
+        record = live.get(document_id, owner_id=TEST_USER)
         assert record is not None
         small.put(record)
 
-    assert len(small.recent()) == 2
-    assert small.get(ids[0]) is None
-    assert small.get(ids[2]) is not None
+    assert len(small.recent(owner_id=TEST_USER)) == 2
+    assert small.get(ids[0], owner_id=TEST_USER) is None
+    assert small.get(ids[2], owner_id=TEST_USER) is not None

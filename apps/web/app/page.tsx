@@ -1,5 +1,10 @@
 "use client";
 
+// Clerk Core 3 removed <SignedIn> / <SignedOut>: they are still exported but
+// throw at render. The hook is the supported path, and it also gives us
+// `isLoaded`, which the components never exposed -- so the signed-out view no
+// longer flashes for a moment before the session resolves.
+import { SignInButton, UserButton, useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
@@ -50,6 +55,7 @@ function isRenderable(value: Analysis | null): value is Analysis {
 }
 
 export default function Page() {
+  const { isLoaded, isSignedIn } = useAuth();
   const [status, setStatus] = useState<Status>("idle");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -256,6 +262,8 @@ export default function Page() {
   return (
     <div className={styles.shell}>
       <Header
+        signedIn={Boolean(isSignedIn)}
+        authLoaded={isLoaded}
         analysis={analysis}
         busy={status === "working"}
         onReset={() => {
@@ -319,13 +327,19 @@ export default function Page() {
               label={activeLabel}
             />
           </div>
-        ) : (
+        ) : !isLoaded ? (
+          // Neither view until the session is known. Showing the signed-out
+          // page first makes a returning user watch it disappear.
+          <div className={styles.composer} aria-busy="true" />
+        ) : isSignedIn ? (
           <Composer
             status={status}
             failure={failure}
             onFile={(file) => run((signal) => analyseFile(file, signal))}
             onText={(text, name) => run((signal) => analyseText(text, name, signal))}
           />
+        ) : (
+          <SignedOutIntro />
         )}
       </main>
     </div>
@@ -397,10 +411,14 @@ function Header({
   analysis,
   busy,
   onReset,
+  signedIn,
+  authLoaded,
 }: {
   analysis: Analysis | null;
   busy: boolean;
   onReset: () => void;
+  signedIn: boolean;
+  authLoaded: boolean;
 }) {
   return (
     <header className={styles.header}>
@@ -427,7 +445,57 @@ function Header({
           </button>
         </>
       )}
+
+      <div className={styles.account}>
+        {!authLoaded ? null : signedIn ? (
+          <UserButton />
+        ) : (
+          <SignInButton mode="modal">
+            <button type="button" className={styles.reset}>
+              Sign in
+            </button>
+          </SignInButton>
+        )}
+      </div>
     </header>
+  );
+}
+
+/**
+ * What a signed-out visitor sees.
+ *
+ * It explains what the tool does and why signing in is the price, rather than
+ * showing a bare wall. People are being asked to upload marksheets and identity
+ * documents; the reason their work is kept to their own account is the most
+ * relevant thing on the page.
+ */
+function SignedOutIntro() {
+  return (
+    <div className={styles.composer}>
+      <div className={styles.intro}>
+        <h1 className={styles.headline}>
+          What does this document actually require of you?
+        </h1>
+        <p className={styles.lede}>
+          Upload a notice and get the steps in the order they have to happen,
+          each one traced to the sentence it came from — and a plain list of
+          what the document never says.
+        </p>
+      </div>
+
+      <div className={styles.drop}>
+        <p className={styles.dropText}>Sign in to analyse a document</p>
+        <SignInButton mode="modal">
+          <button type="button" className={styles.primary}>
+            Continue with Google
+          </button>
+        </SignInButton>
+        <p className={styles.limit}>
+          Your documents are visible only to your account, and you can delete
+          all of them at any time. Nothing is shared with anyone else.
+        </p>
+      </div>
+    </div>
   );
 }
 

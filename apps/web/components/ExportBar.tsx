@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import type { Analysis, EnquiryDraft } from "@/lib/api";
-import { calendarUrl, fetchEnquiry } from "@/lib/api";
+import { downloadCalendar, fetchEnquiry } from "@/lib/api";
 import styles from "./ExportBar.module.css";
 
 /*
@@ -54,13 +54,15 @@ export function ExportBar({ analysis }: { analysis: Analysis }) {
     <div className={styles.bar}>
       <div className={styles.row}>
         {dated > 0 ? (
-          <a
+          <button
+            type="button"
             className={styles.action}
-            href={calendarUrl(analysis.document_id)}
-            download
+            onClick={() => {
+              void downloadCalendar(analysis.document_id, analysis.filename);
+            }}
           >
             Add {dated} dated step{dated === 1 ? "" : "s"} to a calendar
-          </a>
+          </button>
         ) : (
           <span className={styles.disabled}>
             No step has a date to put in a calendar

@@ -477,3 +477,16 @@
     transform: rotate(360deg);
   }
 }
+
+/* Account control. Pushed to the end of the header row so the document's own
+   identity keeps the position the eye lands on first. */
+.account {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  /* Clerk renders its own button; this reserves the space so the header does
+     not reflow when the avatar finishes loading. */
+  min-width: 2rem;
+  min-height: 2rem;
+}

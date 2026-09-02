@@ -22,6 +22,9 @@ dependencies = [
     "pydantic>=2.7,<3.0",
     "python-multipart>=0.0.9,<1.0",
     "pypdf>=4.2,<7.0",
+    # RS256 verification of Clerk session tokens. The `crypto` extra pulls in
+    # `cryptography`, without which PyJWT can only handle HMAC.
+    "PyJWT[crypto]>=2.8,<3.0",
 ]
 
 [project.optional-dependencies]

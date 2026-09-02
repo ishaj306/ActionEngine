@@ -1,5 +1,7 @@
+import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, Newsreader, IBM_Plex_Mono } from "next/font/google";
+import { AuthBridge } from "@/components/AuthBridge";
 import "./globals.css";
 
 /*
@@ -45,13 +47,27 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body className={`${sans.variable} ${serif.variable} ${mono.variable}`}>
-        <a className="skip-link" href="#main">
-          Skip to content
-        </a>
-        {children}
-      </body>
-    </html>
+    <ClerkProvider
+      afterSignOutUrl="/"
+      appearance={{
+        // Clerk's own chrome would arrive with its own palette and radii. The
+        // variables here are the ones the rest of the interface already uses,
+        // so the sign-in card reads as part of the same product.
+        variables: {
+          colorPrimary: "#3b5bdb",
+          borderRadius: "0.5rem",
+          fontFamily: "var(--font-instrument)",
+        },
+      }}
+    >
+      <html lang="en">
+        <body className={`${sans.variable} ${serif.variable} ${mono.variable}`}>
+          <a className="skip-link" href="#main">
+            Skip to content
+          </a>
+          <AuthBridge>{children}</AuthBridge>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

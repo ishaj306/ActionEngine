@@ -21,6 +21,12 @@ from app.modules.ingestion.ocr import OcrEngine, OcrUnavailable, default_engine
 #: sentence-level matching does not accidentally bridge a page boundary.
 PAGE_BREAK = "\n\n"
 
+#: Refused above this many pages. The 20 MB upload cap does not bound work: a
+#: PDF's page tree is compressed, so a small file can declare tens of thousands
+#: of pages and turn one request into minutes of parsing. Notices are not
+#: hundreds of pages long, so the limit costs nothing real.
+MAX_PDF_PAGES = 200
+
 #: Below this many extractable characters per page, a PDF page is presumed to
 #: be a scan whose text layer is absent or decorative.
 _SCAN_THRESHOLD = 24
@@ -262,6 +268,10 @@ def _parse_pdf(data: bytes, engine: OcrEngine) -> ParsedDocument:
         # decrypt() is still only attempted on an encrypted file.
         if reader.is_encrypted and reader.decrypt("") == 0:
             raise UnsupportedDocument("PDF is password protected")
+        if len(reader.pages) > MAX_PDF_PAGES:
+            raise UnsupportedDocument(
+                f"PDF has {len(reader.pages)} pages; the limit is {MAX_PDF_PAGES}"
+            )
         raw_pages = [page.extract_text() or "" for page in reader.pages]
     except UnsupportedDocument:
         raise

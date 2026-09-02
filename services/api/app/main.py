@@ -15,13 +15,17 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from threading import Lock
+from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
+from app.api.auth import Principal, current_user, settings
 from app.api.export import calendar_for, enquiry_for
+from app.api.limits import requests as request_limit
+from app.api.limits import uploads as upload_limit
 from app.api.schemas import (
     AnalysisOut,
     ComparisonOut,
@@ -62,6 +66,8 @@ class Record:
     page map has to survive as long as the analysis does.
     """
 
+    #: Who uploaded it. Every read is filtered on this.
+    owner_id: str
     analysis: AnalysisOut
     #: The same reading in domain form. Cross-document reasoning works on
     #: findings rather than on the wire model, and both are produced by the one
@@ -74,7 +80,13 @@ class Record:
 
 
 class Store:
-    """Bounded, thread-safe map of records, keyed by document id."""
+    """Bounded, thread-safe map of records, keyed by document id.
+
+    Ownership is enforced here rather than in the handlers. A filter that lives
+    at the call site has to be remembered at every call site, and forgetting it
+    once in one route is enough to expose everything; a store that cannot
+    return another tenant's record makes the mistake impossible to write.
+    """
 
     def __init__(self, capacity: int = MAX_RETAINED_DOCUMENTS) -> None:
         self._items: OrderedDict[str, Record] = OrderedDict()
@@ -89,17 +101,42 @@ class Store:
             while len(self._items) > self._capacity:
                 self._items.popitem(last=False)
 
-    def get(self, document_id: str) -> Record | None:
-        with self._lock:
-            return self._items.get(document_id)
+    def get(self, document_id: str, *, owner_id: str) -> Record | None:
+        """The record, or None -- including when it exists but is not theirs.
 
-    def recent(self) -> list[AnalysisOut]:
+        None rather than a distinct "forbidden" result on purpose. A 403 would
+        confirm that a document with this id exists, which is exactly what
+        someone probing for other people's ids wants to learn.
+        """
         with self._lock:
-            return [record.analysis for record in reversed(self._items.values())]
+            found = self._items.get(document_id)
+            return found if found and found.owner_id == owner_id else None
 
-    def delete(self, document_id: str) -> bool:
+    def recent(self, *, owner_id: str) -> list[AnalysisOut]:
         with self._lock:
-            return self._items.pop(document_id, None) is not None
+            return [
+                record.analysis
+                for record in reversed(self._items.values())
+                if record.owner_id == owner_id
+            ]
+
+    def delete(self, document_id: str, *, owner_id: str) -> bool:
+        with self._lock:
+            found = self._items.get(document_id)
+            if found is None or found.owner_id != owner_id:
+                return False
+            del self._items[document_id]
+            return True
+
+    def delete_all(self, *, owner_id: str) -> int:
+        """Everything this user uploaded. People are entitled to leave."""
+        with self._lock:
+            doomed = [
+                key for key, record in self._items.items() if record.owner_id == owner_id
+            ]
+            for key in doomed:
+                del self._items[key]
+            return len(doomed)
 
 
 store = Store()
@@ -132,11 +169,25 @@ async def _unsupported(_request, exc: UnsupportedDocument) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "time": datetime.now(UTC).isoformat()}
+    """Unauthenticated on purpose: a load balancer has no token.
+
+    It reports liveness and whether auth is configured, and nothing about any
+    document or user.
+    """
+    return {
+        "status": "ok",
+        "time": datetime.now(UTC).isoformat(),
+        "auth": "configured" if settings.is_configured else (
+            "development" if settings.dev_user else "unconfigured"
+        ),
+    }
 
 
 @app.post("/v1/documents", response_model=AnalysisOut, status_code=201)
-async def upload(file: UploadFile = File(...)) -> AnalysisOut:
+async def upload(
+    file: UploadFile = File(...),
+    caller: Principal = Depends(current_user),
+) -> AnalysisOut:
     """Parse and analyse an uploaded document.
 
     Synchronous because rule-based analysis of a notice completes in
@@ -144,6 +195,8 @@ async def upload(file: UploadFile = File(...)) -> AnalysisOut:
     202, and the response model already carries everything the polling client
     would need.
     """
+    upload_limit.check(caller.user_id)
+
     payload = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(payload) > MAX_UPLOAD_BYTES:
         raise HTTPException(
@@ -154,11 +207,16 @@ async def upload(file: UploadFile = File(...)) -> AnalysisOut:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
     document = parse(payload, filename=file.filename)
-    result = _record(document, filename=file.filename or "untitled").analysis
+    result = _record(
+        document, filename=file.filename or "untitled", owner_id=caller.user_id
+    ).analysis
 
+    # Filename and counts only. A log line is the easiest place for document
+    # content to end up somewhere it was never meant to go.
     logger.info(
-        "analysed %s: %d actions, %d gaps, %.1fms",
+        "analysed %s for %s: %d actions, %d gaps, %.1fms",
         result.filename,
+        caller.user_id,
         len(result.actions),
         len(result.gaps),
         result.duration_ms,
@@ -167,7 +225,10 @@ async def upload(file: UploadFile = File(...)) -> AnalysisOut:
 
 
 @app.post("/v1/documents/text", response_model=AnalysisOut, status_code=201)
-def upload_text(body: dict[str, str]) -> AnalysisOut:
+def upload_text(
+    body: dict[str, str],
+    caller: Principal = Depends(current_user),
+) -> AnalysisOut:
     """Analyse pasted text.
 
     The fastest path to a first result, and the one the sample documents use --
@@ -176,6 +237,8 @@ def upload_text(body: dict[str, str]) -> AnalysisOut:
     """
     from app.modules.ingestion.document import from_text
 
+    upload_limit.check(caller.user_id)
+
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="No text was provided.")
@@ -183,13 +246,19 @@ def upload_text(body: dict[str, str]) -> AnalysisOut:
         raise HTTPException(status_code=413, detail="Text exceeds 200,000 characters.")
 
     document = from_text(text)
-    return _record(document, filename=body.get("filename") or "Pasted text").analysis
+    return _record(
+        document,
+        filename=body.get("filename") or "Pasted text",
+        owner_id=caller.user_id,
+    ).analysis
 
 
 def _record(
     document: ParsedDocument,
     *,
     filename: str,
+    owner_id: str,
+    document_id: str | None = None,
     completed: frozenset[str] = frozenset(),
     profile: Profile | None = None,
 ) -> Record:
@@ -197,10 +266,15 @@ def _record(
     analysis = analyse(
         document,
         today=date.today(),
+        # A random id, not a hash of the content. A content hash is identical for
+        # everyone who uploads the same circular, which turns a document id into
+        # a guess anyone can make about somebody else's upload.
+        document_id=document_id or uuid4().hex,
         completed=completed,
         profile=profile,
     )
     record = Record(
+        owner_id=owner_id,
         analysis=AnalysisOut.of(analysis, filename=filename, text=document.text),
         reading=analysis,
         document=document,
@@ -213,17 +287,25 @@ def _record(
 
 
 @app.get("/v1/documents", response_model=list[AnalysisOut])
-def list_documents() -> list[AnalysisOut]:
-    return store.recent()
+def list_documents(caller: Principal = Depends(current_user)) -> list[AnalysisOut]:
+    request_limit.check(caller.user_id)
+    return store.recent(owner_id=caller.user_id)
 
 
 @app.get("/v1/documents/{document_id}", response_model=AnalysisOut)
-def get_document(document_id: str) -> AnalysisOut:
-    return _require(document_id).analysis
+def get_document(
+    document_id: str,
+    caller: Principal = Depends(current_user),
+) -> AnalysisOut:
+    return _require(document_id, caller).analysis
 
 
 @app.patch("/v1/documents/{document_id}", response_model=AnalysisOut)
-def update_plan(document_id: str, patch: PlanPatch) -> AnalysisOut:
+def update_plan(
+    document_id: str,
+    patch: PlanPatch,
+    caller: Principal = Depends(current_user),
+) -> AnalysisOut:
     """Update the reader's working state and re-derive the plan from it.
 
     Ticking a step off is not a display concern. A completed prerequisite stops
@@ -232,7 +314,7 @@ def update_plan(document_id: str, patch: PlanPatch) -> AnalysisOut:
     line. Re-analysis runs against the stored parsed document, so page maps and
     OCR confidence are exactly what they were on upload.
     """
-    record = _require(document_id)
+    record = _require(document_id, caller)
 
     completed = record.completed
     if patch.completed is not None:
@@ -254,13 +336,18 @@ def update_plan(document_id: str, patch: PlanPatch) -> AnalysisOut:
     return _record(
         record.document,
         filename=record.filename,
+        owner_id=caller.user_id,
+        document_id=document_id,
         completed=completed,
         profile=profile,
     ).analysis
 
 
 @app.get("/v1/documents/{document_id}/calendar.ics", response_class=PlainTextResponse)
-def calendar(document_id: str) -> PlainTextResponse:
+def calendar(
+    document_id: str,
+    caller: Principal = Depends(current_user),
+) -> PlainTextResponse:
     """The dated steps as an iCalendar file.
 
     Served as a download rather than pushed to a calendar account. A live
@@ -268,7 +355,7 @@ def calendar(document_id: str) -> PlainTextResponse:
     deliver what a file delivers, and would put writes into somebody's calendar
     on the strength of an extraction.
     """
-    record = _require(document_id)
+    record = _require(document_id, caller)
     return PlainTextResponse(
         content=calendar_for(record.analysis),
         media_type="text/calendar; charset=utf-8",
@@ -287,9 +374,12 @@ class EnquiryOut(BaseModel):
 
 
 @app.get("/v1/documents/{document_id}/enquiry", response_model=EnquiryOut)
-def enquiry(document_id: str) -> EnquiryOut:
+def enquiry(
+    document_id: str,
+    caller: Principal = Depends(current_user),
+) -> EnquiryOut:
     """A draft email asking whatever the document failed to state."""
-    draft = enquiry_for(_require(document_id).analysis)
+    draft = enquiry_for(_require(document_id, caller).analysis)
     return EnquiryOut(
         subject=draft.subject,
         body=draft.body,
@@ -298,7 +388,11 @@ def enquiry(document_id: str) -> EnquiryOut:
 
 
 @app.get("/v1/documents/{document_id}/changes", response_model=ComparisonOut)
-def changes(document_id: str, since: str) -> ComparisonOut:
+def changes(
+    document_id: str,
+    since: str,
+    caller: Principal = Depends(current_user),
+) -> ComparisonOut:
     """What changed between an earlier reading of a document and this one.
 
     Compares findings, not text. A reissued notice is reflowed and renumbered,
@@ -309,8 +403,8 @@ def changes(document_id: str, since: str) -> ComparisonOut:
         raise HTTPException(
             status_code=422, detail="A document cannot be compared with itself."
         )
-    previous = _require(since)
-    current = _require(document_id)
+    previous = _require(since, caller)
+    current = _require(document_id, caller)
 
     return ComparisonOut.of(
         compare(previous.reading, current.reading),
@@ -320,7 +414,10 @@ def changes(document_id: str, since: str) -> ComparisonOut:
 
 
 @app.post("/v1/portfolio", response_model=PortfolioOut)
-def portfolio(request: PortfolioRequest) -> PortfolioOut:
+def portfolio(
+    request: PortfolioRequest,
+    caller: Principal = Depends(current_user),
+) -> PortfolioOut:
     """Read several analysed documents as one body of instructions.
 
     Contradictions between them are the output worth having: a corrigendum that
@@ -330,7 +427,7 @@ def portfolio(request: PortfolioRequest) -> PortfolioOut:
     for document_id in request.document_ids:
         if document_id in seen:
             continue
-        record = _require(document_id)
+        record = _require(document_id, caller)
         seen[document_id] = (record.filename, record.reading)
 
     if len(seen) < 2:
@@ -341,8 +438,14 @@ def portfolio(request: PortfolioRequest) -> PortfolioOut:
     return PortfolioOut.of(review(seen))
 
 
-def _require(document_id: str) -> Record:
-    found = store.get(document_id)
+def _require(document_id: str, caller: Principal) -> Record:
+    """The caller's document, or 404.
+
+    Someone else's document is a 404 rather than a 403, because a 403 confirms
+    the id exists and that is precisely what a probe is looking for.
+    """
+    request_limit.check(caller.user_id)
+    found = store.get(document_id, owner_id=caller.user_id)
     if found is None:
         raise HTTPException(status_code=404, detail="No such document.")
     return found
@@ -364,6 +467,26 @@ def _ascii_slug(filename: str) -> str:
 
 
 @app.delete("/v1/documents/{document_id}", status_code=204)
-def delete_document(document_id: str) -> None:
-    if not store.delete(document_id):
+def delete_document(
+    document_id: str,
+    caller: Principal = Depends(current_user),
+) -> None:
+    if not store.delete(document_id, owner_id=caller.user_id):
         raise HTTPException(status_code=404, detail="No such document.")
+
+
+class DeletionOut(BaseModel):
+    deleted: int
+
+
+@app.delete("/v1/documents", response_model=DeletionOut)
+def delete_everything(caller: Principal = Depends(current_user)) -> DeletionOut:
+    """Remove everything this user uploaded.
+
+    People hand this system marksheets and identity documents. Being able to
+    take all of it back in one action, without contacting anybody, is part of
+    what makes handing it over reasonable in the first place.
+    """
+    removed = store.delete_all(owner_id=caller.user_id)
+    logger.info("deleted %d documents for %s", removed, caller.user_id)
+    return DeletionOut(deleted=removed)

@@ -92,5 +92,10 @@ jobs:
       - name: Types
         run: npm run typecheck
 
+      # Placeholder keys: the build needs Clerk's env vars to exist, and a
+      # publishable key is public by design. Nothing real is committed here.
       - name: Build
         run: npm run build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_cGxhY2Vob2xkZXIuY2xlcmsuYWNjb3VudHMuZGV2JA
+          CLERK_SECRET_KEY: sk_test_placeholder
