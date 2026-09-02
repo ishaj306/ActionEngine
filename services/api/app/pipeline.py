@@ -10,6 +10,7 @@ function of the graph.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -26,6 +27,7 @@ from app.modules.action_engine.planner import Action, ActionVerb, Plan, build_pl
 from app.modules.extraction import requirements as requirement_rules
 from app.modules.extraction import rules
 from app.modules.extraction.classify import TYPE_LABEL, classify
+from app.modules.extraction.model import DateOption, ModelExtractor
 from app.modules.extraction.requirements import Requirement
 from app.modules.extraction.temporal import (
     TemporalExpression,
@@ -33,6 +35,7 @@ from app.modules.extraction.temporal import (
     extract_temporal,
     issue_date,
 )
+from app.modules.extraction.verify import VerificationReport, verify
 from app.modules.ingestion.document import ParsedDocument, SourceKind
 from app.modules.reasoning.relevance import (
     Assessment,
@@ -44,6 +47,8 @@ from app.modules.reasoning.relevance import (
     assess,
     extract_criteria,
 )
+
+logger = logging.getLogger("action_engine.pipeline")
 
 #: Confidence at or above which a temporal expression is stated outright.
 _FACT_THRESHOLD = 0.85
@@ -145,8 +150,14 @@ def analyse(
     document_id: str | None = None,
     completed: frozenset[str] = frozenset(),
     profile: Profile | None = None,
+    extractor: ModelExtractor | None = None,
 ) -> Analysis:
-    """Run the full pipeline over an already-parsed document."""
+    """Run the full pipeline over an already-parsed document.
+
+    `extractor` switches the model arm on. None -- the default -- runs the rule
+    arm alone, which is a complete system: no key, no spend, no behaviour
+    change unless the caller opts in.
+    """
     started = perf_counter()
     text = document.text
 
@@ -161,13 +172,25 @@ def analyse(
         if expression.is_deadline and expression.resolved
     )
 
-    candidates = rules.extract_actions(text)
+    candidates = list(rules.extract_actions(text))
+    gap_candidates = list(rules.extract_gaps(text))
+    extra_requirements: tuple[str, ...] = ()
+    verification: VerificationReport | None = None
+
+    if extractor is not None:
+        verification = _run_model(extractor, text, temporal)
+        if verification is not None:
+            candidates = _merge_actions(candidates, verification.actions)
+            gap_candidates = _merge_gaps(gap_candidates, verification.gaps)
+            extra_requirements = verification.requirements
+
     actions = _build_actions(candidates, temporal, document)
     plan = build_plan(actions, today=today, completed=completed)
 
-    gaps = tuple(_gap(candidate, document) for candidate in rules.extract_gaps(text))
+    gaps = tuple(_gap(candidate, document) for candidate in gap_candidates)
     requirements = requirement_rules.group(
         tuple(phrase for action in actions for phrase in action.requires)
+        + extra_requirements
     )
 
     criteria = extract_criteria(text)
@@ -202,6 +225,73 @@ def analyse(
         ocr_engine=document.ocr_engine,
         duration_ms=round((perf_counter() - started) * 1000, 2),
     )
+
+
+def _run_model(
+    extractor: ModelExtractor,
+    text: str,
+    temporal: list[TemporalExpression],
+) -> VerificationReport | None:
+    """Ask the model, then verify every word of what it says.
+
+    A failure here degrades to the rule arm rather than to an error page. The
+    model is an improvement on a working system, not a dependency of one, and a
+    notice the reader needs today is worth more than a perfect reading of it.
+    """
+    options = tuple(
+        DateOption(id=f"date-{index + 1}", text=item.text, iso=item.resolved.isoformat())
+        for index, item in enumerate(temporal)
+        if item.resolved
+    )
+    try:
+        extraction = extractor.extract(text, options)
+    except Exception:
+        logger.exception("model extraction failed; falling back to the rule arm")
+        return None
+    return verify(extraction, text=text, dates=options)
+
+
+def _merge_actions(
+    rule_based: list[rules.ActionCandidate],
+    model_based: tuple[rules.ActionCandidate, ...],
+) -> list[rules.ActionCandidate]:
+    """Combine the two arms, preferring the rules where they overlap.
+
+    Where both arms find the same instruction, the rule reading wins. Not
+    because it is better written -- the model's phrasing is usually better --
+    but because it is reproducible: the same document produces the same plan
+    every time, which is what makes the golden tests and the benchmark mean
+    anything. The model's contribution is the instructions the rules never saw.
+    """
+    merged = list(rule_based)
+    for candidate in model_based:
+        if any(_overlaps(candidate, existing) for existing in merged):
+            continue
+        merged.append(candidate)
+    merged.sort(key=lambda item: (item.char_start, item.char_end))
+    return merged
+
+
+def _merge_gaps(
+    rule_based: list[rules.GapCandidate],
+    model_based: tuple[rules.GapCandidate, ...],
+) -> list[rules.GapCandidate]:
+    merged = list(rule_based)
+    for candidate in model_based:
+        if any(_overlaps(candidate, existing) for existing in merged):
+            continue
+        merged.append(candidate)
+    merged.sort(key=lambda item: item.char_start)
+    return merged
+
+
+def _overlaps(left, right) -> bool:
+    """Whether two findings point at substantially the same text."""
+    shared = min(left.char_end, right.char_end) - max(left.char_start, right.char_start)
+    if shared <= 0:
+        return False
+    shortest = min(left.char_end - left.char_start, right.char_end - right.char_start)
+    return shortest > 0 and shared / shortest >= 0.5
 
 
 def _document_type(document: ParsedDocument) -> Claim[str]:
@@ -309,7 +399,7 @@ def _build_actions(
                     ),
                     evidence=_span(candidate.char_start, candidate.char_end, document),
                 ),
-                deadline=_deadline_for(candidate, temporal),
+                deadline=candidate.deadline or _deadline_for(candidate, temporal),
                 effort_days=_DEFAULT_EFFORT[candidate.verb],
                 conditional_on=candidate.conditional_on,
                 optional=candidate.optional,

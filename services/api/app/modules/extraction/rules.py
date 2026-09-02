@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import date
 
 from app.modules.action_engine.planner import ActionVerb
 from app.modules.extraction.requirements import names_an_artefact
@@ -274,6 +275,11 @@ class ActionCandidate:
     conditional_on: str | None = None
     #: True when the document says the reader may, not must.
     optional: bool = False
+    #: Set only by the model arm, which can attach a date stated in a different
+    #: sentence. The rule arm deliberately leaves this None: linking a date
+    #: across sentences without a syntactic connection is the confident guess
+    #: the rules exist to avoid making.
+    deadline: date | None = None
 
 
 @dataclass(frozen=True, slots=True)

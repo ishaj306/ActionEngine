@@ -44,3 +44,7 @@ strategy.html
 # Local database files
 *.db
 *.db-journal
+
+# Recorded model responses for the ablation (regenerate with eval/score.py --arm hybrid)
+# Kept out of the repo until there is a real run to commit.
+eval/cache/

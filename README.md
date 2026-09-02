@@ -134,11 +134,12 @@ are invisible in the output and wrong about half the time.
 | Classification | Weighted lexical | Cheap, inspectable, and its margin *is* its confidence |
 | Dependency graph, scheduling | Deterministic | Topological order and slack are arithmetic |
 | Evidence anchoring | Fuzzy match, scored | Models quote approximately; the score travels with the span |
-| Action & requirement extraction | Rules today, hybrid next | The rule arm is the evaluation baseline, not a stub |
+| Action & requirement extraction | Hybrid, rules first | The rule arm is the evaluation baseline and the fallback, not a stub |
 | Eligibility matching | Deterministic | Comparing a self-declared number to a stated bar is arithmetic |
 | Eligibility *extraction* from prose | Rules today, model next | Restrictions are phrased a hundred ways; the rules cover the common ones |
+| Model output | Verified against the source | Every quote must anchor, or the claim is discarded |
 | Revision and cross-document diff | Deterministic | Set comparison over findings that already carry their own confidence |
-| Ambiguity, cross-sentence attachment | Model (next phase) | No rule-based answer exists |
+| Ambiguity, cross-sentence attachment | Model | No rule-based answer exists |
 
 `03/04/2026` comes back flagged with **both** readings and a confidence of 0.45,
 not silently disambiguated.
@@ -258,6 +259,62 @@ Per-account rate limits are in-process, so two replicas each allow the full
 quota. That is a real limitation, stated in the module rather than hidden; the
 fix is a shared counter, and it belongs with the deployment work rather than
 ahead of it.
+
+---
+
+## The model arm
+
+Off by default. `EXTRACTION_MODE=hybrid` plus `ANTHROPIC_API_KEY` turns it on;
+without both, the engine runs the rules alone and behaves exactly as it did
+before the arm existed. That is not timidity — the rule arm is a complete
+system, which is what makes it a fair baseline.
+
+Three structural choices make invention hard rather than merely detectable.
+
+**The model cannot emit a date.** Dates are arithmetic and already resolved, so
+the model receives the dates that were found, each with an id, and may only
+*reference* one. There is no field it could write `18 September 2026` into. A
+hallucinated deadline is not caught — it is unrepresentable. An id that is not
+on the list resolves to nothing, and the action loses its deadline rather than
+acquiring an invented one.
+
+**Every claim must quote the document verbatim,** and `anchor()` has to resolve
+that quote to real offsets in the real text:
+
+```
+quote → anchor(quote, document)
+        ├── None ............... DROP. The document does not say this.
+        ├── below the floor .... KEEP, demoted to UNCERTAIN.
+        └── resolved ........... KEEP, with real offsets.
+```
+
+The hardest module in v1 turns out to be the hallucination detector. A model
+that invents a sentence produces a quote no fuzzy matching will find, so the
+finding is discarded before it can become a `Claim` — which would refuse it
+anyway, since a FACT without evidence raises at construction.
+
+The middle branch matters too. Models quote approximately: a dropped article,
+re-flowed whitespace. That is not fabrication and dropping it throws away good
+findings, but it is not verbatim either, and the difference belongs in the
+confidence rather than in a footnote.
+
+**The model has no tools,** and the document arrives inside delimiters in a user
+message, never in the system prompt. The structural defence is the one that
+counts: an output schema of actions and requirements has no field an injected
+instruction could occupy. A document reading `IGNORE ALL PREVIOUS INSTRUCTIONS`
+can at worst become a row in a checklist.
+
+Where both arms find the same instruction the rule reading wins — not because
+it is better written, but because it is reproducible, which is what makes the
+benchmark mean anything. The model's contribution is what the rules never saw.
+
+A model failure degrades to the rules rather than to an error page. A notice
+the reader needs today beats a perfect reading of it.
+
+**The ablation is not yet run.** `eval/score.py --arm hybrid` refuses rather
+than silently reporting rule-arm numbers under a hybrid heading, and it records
+every response so a run costs money once. The table below has one row until
+someone spends the money to fill in the other.
 
 ---
 

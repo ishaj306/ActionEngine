@@ -14,6 +14,8 @@ number is meant to say so.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -24,6 +26,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from labels import GoldDocument, Span, load_corpus  # noqa: E402
 
+from app.modules.extraction.model import (  # noqa: E402
+    AnthropicExtractor,
+    DateOption,
+    ModelExtraction,
+)
 from app.modules.extraction.temporal import extract_temporal  # noqa: E402
 from app.modules.ingestion.document import from_text  # noqa: E402
 from app.pipeline import analyse  # noqa: E402
@@ -119,8 +126,81 @@ class Report:
     by_tag: dict[str, Tally] = field(default_factory=lambda: defaultdict(Tally))
 
 
-def score_document(gold: GoldDocument, report: Report) -> None:
-    analysis = analyse(from_text(gold.text), today=REFERENCE)
+class CachedExtractor:
+    """Records every model response to disk, and replays it thereafter.
+
+    The ablation is meant to be re-run whenever the merge logic changes, and
+    paying for the same fifty documents each time is both wasteful and a good
+    way to end up not re-running it. Responses are keyed by document text, so a
+    changed corpus re-queries only what changed.
+
+    It also makes the numbers reproducible by anyone with the cache, without a
+    key and without spend.
+    """
+
+    def __init__(self, directory: Path, inner=None) -> None:
+        self.directory = directory
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.inner = inner
+        self.hits = 0
+        self.misses = 0
+
+    def extract(self, text: str, dates: tuple[DateOption, ...]) -> ModelExtraction:
+        key = _cache_key(text)
+        path = self.directory / f"{key}.json"
+        if path.exists():
+            self.hits += 1
+            return ModelExtraction.model_validate_json(path.read_text(encoding="utf-8"))
+        if self.inner is None:
+            raise RuntimeError(
+                f"No cached response for {key} and no live extractor configured. "
+                "Set ANTHROPIC_API_KEY to query the model, or run with --arm rules."
+            )
+        self.misses += 1
+        result = self.inner.extract(text, dates)
+        path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        return result
+
+
+def build_arm(arm: str, cache_dir: Path, documents: list[GoldDocument]):
+    """The extractor for one ablation arm, or None for the rule baseline.
+
+    Refuses upfront when the model arm cannot actually run. The pipeline
+    deliberately degrades to the rules when a model call fails -- correct in
+    production, where a notice needed today beats a perfect reading of it --
+    but in a benchmark that silence is a lie: the run completes and prints
+    rule-arm numbers under a "hybrid" heading. Better to stop here.
+    """
+    if arm == "rules":
+        return None
+
+    live = AnthropicExtractor() if os.getenv("ANTHROPIC_API_KEY") else None
+    extractor = CachedExtractor(cache_dir, inner=live)
+    if live is not None:
+        return extractor
+
+    missing = [
+        gold.name
+        for gold in documents
+        if not (cache_dir / f"{_cache_key(gold.text)}.json").exists()
+    ]
+    if missing:
+        raise SystemExit(
+            f"--arm hybrid needs the model for {len(missing)} of {len(documents)} "
+            f"documents and ANTHROPIC_API_KEY is not set.\n"
+            f"  Missing: {', '.join(missing[:5])}"
+            f"{' ...' if len(missing) > 5 else ''}\n"
+            "Set the key to query them (this spends money), or run --arm rules."
+        )
+    return extractor
+
+
+def _cache_key(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:24]
+
+
+def score_document(gold: GoldDocument, report: Report, extractor=None) -> None:
+    analysis = analyse(from_text(gold.text), today=REFERENCE, extractor=extractor)
 
     report.type_total += 1
     if analysis.document_type.value.lower().replace(" ", "_") == _type_label(gold.document_type):
@@ -445,14 +525,32 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--detail", action="store_true", help="list every miss")
     parser.add_argument("--corpus", type=Path, default=Path(__file__).parent / "corpus")
+    parser.add_argument(
+        "--arm",
+        choices=["rules", "hybrid"],
+        default="rules",
+        help="rules: deterministic only, free. hybrid: adds the model arm, "
+        "which queries the API for any document not already cached.",
+    )
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=Path(__file__).parent / "cache",
+        help="Where model responses are recorded and replayed from.",
+    )
     args = parser.parse_args()
 
     documents = load_corpus(args.corpus)
+    extractor = build_arm(args.arm, args.cache, documents)
     report = Report()
     for gold in documents:
-        score_document(gold, report)
+        score_document(gold, report, extractor)
 
-    print(f"\nCorpus: {len(documents)} documents, reference date {REFERENCE}\n")
+    print(f"\nCorpus: {len(documents)} documents, reference date {REFERENCE}")
+    print(f"Arm:    {args.arm}")
+    if isinstance(extractor, CachedExtractor):
+        print(f"Model:  {extractor.hits} cached, {extractor.misses} queried")
+    print()
 
     print(f"{'stage':<28} {'gold':>5} {'P':>7} {'R':>7} {'F1':>7}")
     print("-" * 58)

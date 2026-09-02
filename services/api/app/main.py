@@ -35,6 +35,7 @@ from app.api.schemas import (
 )
 from app.comparison.changes import compare
 from app.comparison.crossdoc import review
+from app.modules.extraction.model import build_extractor
 from app.modules.ingestion.document import ParsedDocument, UnsupportedDocument, parse
 from app.modules.reasoning.relevance import Profile
 from app.pipeline import Analysis, analyse
@@ -73,6 +74,11 @@ class Reading:
 
 
 store: DocumentStore = build_store()
+
+#: Built once. None unless EXTRACTION_MODE asks for the model arm *and* a key
+#: is present, so the default deployment costs nothing and behaves exactly as
+#: it did before this existed.
+extractor = build_extractor()
 
 app = FastAPI(
     title="Document → Action Engine",
@@ -113,6 +119,7 @@ def health() -> dict[str, str]:
         "auth": "configured" if settings.is_configured else (
             "development" if settings.dev_user else "unconfigured"
         ),
+        "extraction": "hybrid" if extractor else "rules",
     }
 
 
@@ -220,6 +227,7 @@ def _read(stored: StoredDocument) -> Reading:
         document_id=stored.id,
         completed=stored.completed,
         profile=stored.profile,
+        extractor=extractor,
     )
     return Reading(
         stored=stored,

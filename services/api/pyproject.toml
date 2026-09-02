@@ -42,6 +42,11 @@ ocr = [
 postgres = [
     "psycopg[binary]>=3.1,<4.0",
 ]
+# The model arm. Optional because the rule arm is a complete system and the
+# whole suite passes without this installed.
+model = [
+    "anthropic>=1.0,<2.0",
+]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
