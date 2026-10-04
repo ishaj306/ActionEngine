@@ -146,11 +146,18 @@ no_implicit_optional = true
 # None of these ship usable type information, and none are ours to check. Both
 # the bare name and the wildcard are listed because `foo.*` matches submodules
 # of foo but not foo itself.
+#
+# anthropic and google (the model extra) are here for a second reason: they are
+# optional and deliberately absent from the default install, so the lazy imports
+# inside the model arm would otherwise be an "import-not-found" every time mypy
+# runs without that extra -- which is every CI job, since none installs it.
 [[tool.mypy.overrides]]
 module = [
     "pytesseract", "pytesseract.*",
     "PIL", "PIL.*",
     "pypdf", "pypdf.*",
+    "anthropic", "anthropic.*",
+    "google", "google.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

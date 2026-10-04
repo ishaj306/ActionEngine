@@ -78,6 +78,32 @@ jobs:
       - name: Tests
         run: pytest -q
 
+  api-with-model:
+    name: API (model extra installed)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      # The other jobs omit the model extra on purpose, to prove the system runs
+      # without it -- which skips the adapter tests, since they need the provider
+      # SDK to build a request. This job is the other half: it installs the extra
+      # so those tests actually run, and so a bad version bound on the SDKs fails
+      # here rather than in a deploy. No API key is set; the tests use a fake
+      # client and never reach the network.
+      - name: Install with the model extra
+        run: pip install -e ".[dev,model]"
+
+      - name: Tests
+        run: pytest -q
+
   web:
     name: Web
     runs-on: ubuntu-latest

@@ -14,6 +14,7 @@ ablation harness, and it costs money per run.
 
 from __future__ import annotations
 
+import importlib.util
 from datetime import date
 
 import pytest
@@ -30,6 +31,25 @@ from app.modules.extraction.model import (
 from app.modules.extraction.verify import verify
 from app.modules.ingestion.document import from_text
 from app.pipeline import analyse
+
+
+# The model extra (google-genai) is optional and not installed by default, so it
+# is absent in every CI job that proves the system runs without it. These tests
+# inject a fake client, but `extract()` still builds a real `types.Generate-
+# ContentConfig`, so the SDK has to be importable for them to run at all. Where
+# it is not, they skip rather than fail -- and the api-with-model CI job installs
+# the extra precisely so they are exercised somewhere.
+#
+# find_spec on a dotted name imports the parent first and *raises* when it is
+# missing, rather than returning None, so the absent case has to be caught.
+def _module_available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+_HAS_GENAI = _module_available("google.genai")
 
 TODAY = date(2026, 9, 5)
 
@@ -395,6 +415,7 @@ def test_a_quote_too_short_to_verify_is_rejected(quote):
         ModelAction(verb="submit", instruction="Do a thing", quote=quote)
 
 
+@pytest.mark.skipif(not _HAS_GENAI, reason="google-genai (the model extra) is not installed")
 class TestGeminiBackend:
     """The Gemini arm, tested without calling Gemini.
 
