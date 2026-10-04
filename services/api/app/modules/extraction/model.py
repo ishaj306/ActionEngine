@@ -44,6 +44,7 @@ logger = logging.getLogger("action_engine.model")
 __all__ = [
     "AnthropicExtractor",
     "DateOption",
+    "GeminiExtractor",
     "ModelAction",
     "ModelExtraction",
     "ModelExtractor",
@@ -51,10 +52,15 @@ __all__ = [
     "build_extractor",
 ]
 
-#: Opus by default. Extraction quality is the whole point of adding a model at
-#: all, and the cheaper models are a measured choice to make after the ablation
-#: rather than a guess to make before it.
+#: Opus by default on the Anthropic backend. Extraction quality is the whole
+#: point of adding a model at all, and the cheaper models are a measured choice
+#: to make after the ablation rather than a guess to make before it.
 DEFAULT_MODEL = "claude-opus-5"
+
+#: Gemini default. Flash is fast and inexpensive and strong at structured
+#: extraction, which is the shape of this task; override with GEMINI_MODEL once
+#: the ablation says whether pro earns its cost here.
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
 VERB = Literal["obtain", "prepare", "submit", "attend", "confirm"]
 KIND = Literal["document", "information", "condition"]
@@ -206,10 +212,6 @@ class AnthropicExtractor:
         return self._client
 
     def extract(self, text: str, dates: tuple[DateOption, ...]) -> ModelExtraction:
-        catalogue = json.dumps(
-            [{"id": item.id, "text": item.text, "resolves_to": item.iso} for item in dates],
-            indent=2,
-        )
         output_config: dict[str, object] = {}
         if self.effort:
             output_config["effort"] = self.effort
@@ -227,15 +229,7 @@ class AnthropicExtractor:
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        f"Dates already found in this document:\n{catalogue}\n\n"
-                        f"<document>\n{text}\n</document>"
-                    ),
-                }
-            ],
+            messages=[{"role": "user", "content": _user_content(text, dates)}],
             output_format=ModelExtraction,
             **({"output_config": output_config} if output_config else {}),
         )
@@ -252,22 +246,161 @@ class AnthropicExtractor:
         return parsed
 
 
+def _user_content(text: str, dates: tuple[DateOption, ...]) -> str:
+    """The user turn, identical whichever model reads it.
+
+    Shared so the two backends cannot drift: the same date catalogue and the
+    same delimited document, so a prompt change lands in both arms at once and
+    the ablation stays a comparison of models rather than of prompts.
+    """
+    catalogue = json.dumps(
+        [{"id": item.id, "text": item.text, "resolves_to": item.iso} for item in dates],
+        indent=2,
+    )
+    return (
+        f"Dates already found in this document:\n{catalogue}\n\n"
+        f"<document>\n{text}\n</document>"
+    )
+
+
+class _NormalisedUsage:
+    """A usage object shaped the way `Spend.record` reads, whatever the source."""
+
+    __slots__ = ("cache_read_input_tokens", "input_tokens", "output_tokens")
+
+    def __init__(self, *, input_tokens: int, output_tokens: int, cache_read: int) -> None:
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cache_read_input_tokens = cache_read
+
+
+class GeminiExtractor:
+    """Extraction through the Google Gen AI API.
+
+    The same `SYSTEM_PROMPT` and the same `ModelExtraction` schema as the
+    Anthropic arm -- only the client call differs, which is the whole reason the
+    extractor is a protocol. The system prompt goes in `system_instruction`, the
+    document in `contents`, and `response_schema` makes the SDK parse the reply
+    straight into the shared model.
+
+    Gemini has no cache-breakpoint control to match Anthropic's, so the prompt
+    prefix is not explicitly cached here; its implicit caching may still apply.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str = DEFAULT_GEMINI_MODEL,
+        client=None,
+        max_tokens: int = 8000,
+        thinking_budget: int | None = None,
+    ) -> None:
+        self.model = model
+        self.max_tokens = max_tokens
+        self.thinking_budget = thinking_budget
+        self._client = client
+
+    def _get_client(self):
+        if self._client is None:
+            from google import genai
+
+            self._client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        return self._client
+
+    def extract(self, text: str, dates: tuple[DateOption, ...]) -> ModelExtraction:
+        from google.genai import types
+
+        config = types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            response_schema=ModelExtraction,
+            max_output_tokens=self.max_tokens,
+            # Extraction wants the same reading every time, not a creative one.
+            temperature=0.0,
+        )
+        if self.thinking_budget is not None:
+            config.thinking_config = types.ThinkingConfig(thinking_budget=self.thinking_budget)
+
+        response = self._get_client().models.generate_content(
+            model=self.model,
+            contents=_user_content(text, dates),
+            config=config,
+        )
+        self._record(getattr(response, "usage_metadata", None))
+
+        parsed = getattr(response, "parsed", None)
+        if isinstance(parsed, ModelExtraction):
+            return parsed
+        if isinstance(parsed, dict):
+            return ModelExtraction.model_validate(parsed)
+        logger.warning("gemini returned no parseable output")
+        return ModelExtraction()
+
+    @staticmethod
+    def _record(usage) -> None:
+        if usage is None:
+            return
+        spend.record(
+            _NormalisedUsage(
+                input_tokens=getattr(usage, "prompt_token_count", 0) or 0,
+                output_tokens=getattr(usage, "candidates_token_count", 0) or 0,
+                cache_read=getattr(usage, "cached_content_token_count", 0) or 0,
+            )
+        )
+
+
+#: Which backend an AI key implies, when MODEL_PROVIDER does not say outright.
+_PROVIDER_KEYS = (("gemini", "GEMINI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"))
+
+
 def build_extractor() -> ModelExtractor | None:
     """The configured extractor, or None when the model arm is switched off.
 
     Returning None rather than raising is deliberate: the rule arm is a
-    complete system on its own, so an unset key degrades the product rather
-    than breaking it. That is also what makes the rule arm worth keeping good.
+    complete system on its own, so an unset or wrong key degrades the product
+    to rules rather than breaking it. That is also what keeps the rule arm worth
+    keeping good.
+
+    The provider is taken from MODEL_PROVIDER, or inferred from whichever key is
+    present. Inference means a deployment only has to supply a key, not name the
+    vendor twice.
     """
     if os.getenv("EXTRACTION_MODE", "rules").lower() == "rules":
         return None
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        logger.warning(
-            "EXTRACTION_MODE requests the model arm but ANTHROPIC_API_KEY is "
-            "unset; falling back to rules only."
+
+    provider = (os.getenv("MODEL_PROVIDER") or "").strip().lower()
+    if not provider:
+        provider = next((name for name, key in _PROVIDER_KEYS if os.getenv(key)), "")
+
+    if provider == "gemini":
+        if not os.getenv("GEMINI_API_KEY"):
+            _warn_missing("GEMINI_API_KEY")
+            return None
+        budget = os.getenv("GEMINI_THINKING_BUDGET")
+        return GeminiExtractor(
+            model=os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+            thinking_budget=int(budget) if budget else None,
         )
-        return None
-    return AnthropicExtractor(
-        model=os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL),
-        effort=os.getenv("ANTHROPIC_EFFORT") or None,
+
+    if provider == "anthropic":
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            _warn_missing("ANTHROPIC_API_KEY")
+            return None
+        return AnthropicExtractor(
+            model=os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL),
+            effort=os.getenv("ANTHROPIC_EFFORT") or None,
+        )
+
+    logger.warning(
+        "EXTRACTION_MODE requests the model arm but no provider could be "
+        "determined (set MODEL_PROVIDER, or supply a GEMINI_API_KEY or "
+        "ANTHROPIC_API_KEY); falling back to rules only."
+    )
+    return None
+
+
+def _warn_missing(missing_key: str) -> None:
+    logger.warning(
+        "The model arm is enabled but %s is unset; falling back to rules only.",
+        missing_key,
     )

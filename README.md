@@ -264,10 +264,18 @@ ahead of it.
 
 ## The model arm
 
-Off by default. `EXTRACTION_MODE=hybrid` plus `ANTHROPIC_API_KEY` turns it on;
+Off by default. `EXTRACTION_MODE=hybrid` plus a provider key turns it on;
 without both, the engine runs the rules alone and behaves exactly as it did
 before the arm existed. That is not timidity — the rule arm is a complete
 system, which is what makes it a fair baseline.
+
+The provider sits behind one `ModelExtractor` interface, so the arm is not tied
+to a vendor. Two backends ship: **Gemini** (`GEMINI_API_KEY`, the default) and
+**Anthropic** (`ANTHROPIC_API_KEY`). `MODEL_PROVIDER` chooses, or it is inferred
+from whichever key is present. Both read the same prompt and return the same
+schema, so switching providers is a config change, not a code change — and the
+verification below protects either one identically, because it works on the
+output, not the model.
 
 Three structural choices make invention hard rather than merely detectable.
 

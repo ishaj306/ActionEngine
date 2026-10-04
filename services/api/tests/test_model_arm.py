@@ -421,3 +421,148 @@ def test_a_quote_too_short_to_verify_is_rejected(quote):
     """
     with pytest.raises(ValidationError):
         ModelAction(verb="submit", instruction="Do a thing", quote=quote)
+
+
+class TestGeminiBackend:
+    """The Gemini arm, tested without calling Gemini.
+
+    A fake client returns a canned response shaped like the SDK's -- a `parsed`
+    attribute and a `usage_metadata` with Gemini's own token-count names. What is
+    under test is the adapter: that it returns the shared ModelExtraction, and
+    that it translates Gemini's usage into the shape the spend counter reads.
+    Extraction quality is not here; that needs the real model and the ablation.
+    """
+
+    def _fake_client(self, parsed, usage=None):
+        class _Resp:
+            def __init__(self):
+                self.parsed = parsed
+                self.usage_metadata = usage
+
+        class _Models:
+            def __init__(self):
+                self.calls = []
+
+            def generate_content(self, *, model, contents, config):
+                self.calls.append({"model": model, "contents": contents, "config": config})
+                return _Resp()
+
+        class _Client:
+            def __init__(self):
+                self.models = _Models()
+
+        return _Client()
+
+    def test_it_returns_the_shared_extraction_model(self):
+        from app.modules.extraction.model import GeminiExtractor
+
+        canned = ModelExtraction(
+            actions=[
+                ModelAction(
+                    verb="submit",
+                    instruction="Submit the form",
+                    quote="must submit the completed application form",
+                    deadline_id="date-1",
+                )
+            ]
+        )
+        extractor = GeminiExtractor(client=self._fake_client(canned))
+
+        result = extractor.extract(NOTICE, DATES)
+
+        assert result is canned
+        assert result.actions[0].deadline_id == "date-1"
+
+    def test_a_dict_reply_is_coerced(self):
+        """Some SDK versions hand back a dict rather than the model instance."""
+        from app.modules.extraction.model import GeminiExtractor
+
+        payload = {"actions": [], "requirements": [], "gaps": []}
+        extractor = GeminiExtractor(client=self._fake_client(payload))
+
+        assert isinstance(extractor.extract(NOTICE, DATES), ModelExtraction)
+
+    def test_no_parseable_reply_degrades_to_empty(self):
+        from app.modules.extraction.model import GeminiExtractor
+
+        extractor = GeminiExtractor(client=self._fake_client(None))
+
+        assert extractor.extract(NOTICE, DATES) == ModelExtraction()
+
+    def test_gemini_usage_names_are_translated_into_spend(self):
+        from app.api.observability import spend
+        from app.modules.extraction.model import GeminiExtractor
+
+        class _Usage:
+            prompt_token_count = 1200
+            candidates_token_count = 300
+            cached_content_token_count = 800
+
+        before = spend.snapshot()
+        extractor = GeminiExtractor(
+            client=self._fake_client(ModelExtraction(), usage=_Usage())
+        )
+        extractor.extract(NOTICE, DATES)
+        after = spend.snapshot()
+
+        assert after["input_tokens"] - before["input_tokens"] == 1200
+        assert after["output_tokens"] - before["output_tokens"] == 300
+        assert after["cache_read_tokens"] - before["cache_read_tokens"] == 800
+
+    def test_the_document_reaches_the_model_in_a_delimited_block(self):
+        from app.modules.extraction.model import GeminiExtractor
+
+        client = self._fake_client(ModelExtraction())
+        GeminiExtractor(client=client).extract(NOTICE, DATES)
+
+        sent = client.models.calls[0]["contents"]
+        assert "<document>" in sent and "</document>" in sent
+        assert "date-1" in sent  # the resolved date is offered, by id
+
+
+class TestProviderSelection:
+    def test_rules_mode_builds_no_extractor(self, monkeypatch):
+        from app.modules.extraction.model import build_extractor
+
+        monkeypatch.setenv("EXTRACTION_MODE", "rules")
+        assert build_extractor() is None
+
+    def test_a_gemini_key_selects_the_gemini_arm(self, monkeypatch):
+        from app.modules.extraction.model import GeminiExtractor, build_extractor
+
+        monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("MODEL_PROVIDER", raising=False)
+
+        assert isinstance(build_extractor(), GeminiExtractor)
+
+    def test_an_explicit_provider_wins_over_a_present_key(self, monkeypatch):
+        from app.modules.extraction.model import AnthropicExtractor, build_extractor
+
+        monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
+        monkeypatch.setenv("MODEL_PROVIDER", "anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("GEMINI_API_KEY", "also-set")
+
+        assert isinstance(build_extractor(), AnthropicExtractor)
+
+    def test_the_model_arm_on_without_a_key_degrades_to_rules(self, monkeypatch):
+        from app.modules.extraction.model import build_extractor
+
+        monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("MODEL_PROVIDER", raising=False)
+
+        assert build_extractor() is None
+
+    def test_a_configured_gemini_model_is_honoured(self, monkeypatch):
+        from app.modules.extraction.model import build_extractor
+
+        monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+        monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-pro")
+        monkeypatch.delenv("MODEL_PROVIDER", raising=False)
+
+        assert build_extractor().model == "gemini-2.5-pro"

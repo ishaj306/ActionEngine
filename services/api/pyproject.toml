@@ -44,8 +44,19 @@ postgres = [
 ]
 # The model arm. Optional because the rule arm is a complete system and the
 # whole suite passes without this installed.
+# The model arm. Optional because the rule arm is a complete system and the
+# whole suite passes without this installed. Both providers are listed so a
+# container built with this extra can run whichever backend MODEL_PROVIDER (or
+# the key that is present) selects, without a rebuild.
 model = [
     "anthropic>=1.0,<2.0",
+    "google-genai>=1.0,<3.0",
+]
+# Reading a local .env file in development. In a deployment real environment
+# variables are used and this is never needed, which is why it is not a hard
+# dependency; uvicorn[standard] already pulls it in, so a dev install has it.
+dotenv = [
+    "python-dotenv>=1.0,<2.0",
 ]
 dev = [
     "pytest>=8.0",

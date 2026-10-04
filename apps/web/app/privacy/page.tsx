@@ -64,11 +64,12 @@ export default function Privacy() {
         </p>
         <p>
           If the operator has switched on the model arm, the text of your
-          document is sent to Anthropic&rsquo;s API to be read, and the answer
-          is checked against your document before any of it is shown to you.
-          The status endpoint reports which mode is running, so you can check
-          rather than take this on trust. Your name, email and account id are
-          never included.
+          document is sent to the configured model provider&rsquo;s API to be
+          read — Google&rsquo;s Gemini by default — and the answer is checked
+          against your document before any of it is shown to you. The status
+          endpoint reports which mode is running, so you can check rather than
+          take this on trust. Your name, email and account id are never
+          included.
         </p>
       </section>
 

@@ -38,6 +38,9 @@ services:
 
       # The model arm stays off unless you opt in and supply a key.
       EXTRACTION_MODE: ${EXTRACTION_MODE:-rules}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       db:

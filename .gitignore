@@ -31,12 +31,12 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Local agent state
-.claude/settings.local.json
+# Local agent / IDE state (tool-generated, not project config)
+.claude/
 
-# Strategy document — kept locally, published separately rather than shipped
-# with the source.
+# Internal planning docs — kept locally, not shipped with the source.
 strategy.html
+V2_PLAN.md
 
 # Editable install metadata
 *.egg-info/
