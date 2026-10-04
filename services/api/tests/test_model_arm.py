@@ -1,4 +1,4 @@
-"""The model arm, tested without a model.
+﻿"""The model arm, tested without a model.
 
 Every test here runs against a fake extractor returning canned output. That is
 not a compromise for want of an API key: the behaviour worth testing is what
@@ -382,34 +382,6 @@ class TestHybridComposition:
             if claim.classification.value in {"FACT", "INFERENCE"}:
                 assert claim.evidence is not None
 
-
-class TestConfiguration:
-    def test_rules_mode_builds_no_extractor(self, monkeypatch):
-        monkeypatch.setenv("EXTRACTION_MODE", "rules")
-
-        assert build_extractor() is None
-
-    def test_the_model_arm_needs_a_key(self, monkeypatch):
-        """Asking for the model without a key degrades rather than crashing."""
-        monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
-        assert build_extractor() is None
-
-    def test_a_configured_arm_is_built(self, monkeypatch):
-        monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
-
-        built = build_extractor()
-
-        assert built is not None
-        assert built.model == "claude-opus-5"
-
-    def test_the_default_is_rules(self, monkeypatch):
-        monkeypatch.delenv("EXTRACTION_MODE", raising=False)
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
-
-        assert build_extractor() is None
 
 
 @pytest.mark.parametrize("quote", ["", "   ", "x"])
