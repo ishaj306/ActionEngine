@@ -494,13 +494,12 @@ class TestGeminiBackend:
 
 class TestProviderSelection:
     def test_rules_mode_builds_no_extractor(self, monkeypatch):
-        from app.modules.extraction.model import build_extractor
 
         monkeypatch.setenv("EXTRACTION_MODE", "rules")
         assert build_extractor() is None
 
     def test_a_gemini_key_selects_the_gemini_arm(self, monkeypatch):
-        from app.modules.extraction.model import GeminiExtractor, build_extractor
+        from app.modules.extraction.model import GeminiExtractor
 
         monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -510,7 +509,7 @@ class TestProviderSelection:
         assert isinstance(build_extractor(), GeminiExtractor)
 
     def test_an_explicit_provider_wins_over_a_present_key(self, monkeypatch):
-        from app.modules.extraction.model import AnthropicExtractor, build_extractor
+        from app.modules.extraction.model import AnthropicExtractor
 
         monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
         monkeypatch.setenv("MODEL_PROVIDER", "anthropic")
@@ -520,7 +519,6 @@ class TestProviderSelection:
         assert isinstance(build_extractor(), AnthropicExtractor)
 
     def test_the_model_arm_on_without_a_key_degrades_to_rules(self, monkeypatch):
-        from app.modules.extraction.model import build_extractor
 
         monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -530,7 +528,6 @@ class TestProviderSelection:
         assert build_extractor() is None
 
     def test_a_configured_gemini_model_is_honoured(self, monkeypatch):
-        from app.modules.extraction.model import build_extractor
 
         monkeypatch.setenv("EXTRACTION_MODE", "hybrid")
         monkeypatch.setenv("GEMINI_API_KEY", "test-key")
